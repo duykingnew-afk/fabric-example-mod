@@ -1,0 +1,27 @@
+{
+	"key.categories.pocketfsr": "Pocket FSR",
+	"key.pocketfsr.toggle": "Toggle upscaling",
+	"key.pocketfsr.settings": "Open Pocket FSR settings",
+
+	"pocketfsr.button": "Pocket FSR",
+	"pocketfsr.screen.title": "Pocket FSR",
+
+	"pocketfsr.option.enabled": "Upscaling: %s",
+	"pocketfsr.option.on": "ON",
+	"pocketfsr.option.off": "OFF",
+	"pocketfsr.option.scale": "World render scale: %s%%",
+	"pocketfsr.option.mode": "Method: %s",
+	"pocketfsr.mode.fsr1": "FSR 1.0",
+	"pocketfsr.mode.bilinear": "Bilinear (fastest)",
+	"pocketfsr.option.sharpness": "Sharpening: %s%%",
+	"pocketfsr.option.sharpness.off": "Sharpening: Off",
+	"pocketfsr.option.resolution": "3D world %sx%s, shown at %sx%s",
+
+	"pocketfsr.message.on": "Pocket FSR: ON",
+	"pocketfsr.message.off": "Pocket FSR: OFF",
+
+	"pocketfsr.status.failed": "Turned itself off after an error. See the log, then restart.",
+	"pocketfsr.status.iris": "Not compatible with Iris shader packs.",
+	"pocketfsr.status.shaders": "The FSR shaders could not be loaded.",
+	"pocketfsr.status.fabulous": "Not available with Fabulous graphics. Use Fast or Fancy."
+}

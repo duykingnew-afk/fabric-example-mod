@@ -1,0 +1,27 @@
+{
+	"key.categories.pocketfsr": "Pocket FSR",
+	"key.pocketfsr.toggle": "Bật/tắt nâng độ phân giải",
+	"key.pocketfsr.settings": "Mở cài đặt Pocket FSR",
+
+	"pocketfsr.button": "Pocket FSR",
+	"pocketfsr.screen.title": "Pocket FSR",
+
+	"pocketfsr.option.enabled": "Nâng độ phân giải: %s",
+	"pocketfsr.option.on": "BẬT",
+	"pocketfsr.option.off": "TẮT",
+	"pocketfsr.option.scale": "Tỉ lệ render thế giới: %s%%",
+	"pocketfsr.option.mode": "Phương pháp: %s",
+	"pocketfsr.mode.fsr1": "FSR 1.0",
+	"pocketfsr.mode.bilinear": "Bilinear (nhanh nhất)",
+	"pocketfsr.option.sharpness": "Độ sắc nét: %s%%",
+	"pocketfsr.option.sharpness.off": "Độ sắc nét: Tắt",
+	"pocketfsr.option.resolution": "Thế giới 3D %sx%s, hiển thị %sx%s",
+
+	"pocketfsr.message.on": "Pocket FSR: BẬT",
+	"pocketfsr.message.off": "Pocket FSR: TẮT",
+
+	"pocketfsr.status.failed": "Đã tự tắt sau khi gặp lỗi. Xem log rồi khởi động lại game.",
+	"pocketfsr.status.iris": "Không tương thích với shader pack của Iris.",
+	"pocketfsr.status.shaders": "Không tải được shader FSR.",
+	"pocketfsr.status.fabulous": "Không dùng được với đồ họa Fabulous. Hãy chọn Fast hoặc Fancy."
+}

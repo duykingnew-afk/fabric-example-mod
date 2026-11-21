@@ -1,38 +1,39 @@
 {
 	"schemaVersion": 1,
-	"id": "modid",
+	"id": "pocketfsr",
 	"version": "${version}",
-	"name": "Example Mod",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "Pocket FSR",
+	"description": "A lightweight FSR 1.0 style upscaler for phones and tablets. Renders the world at a lower resolution and upscales it with plain OpenGL: no native libraries, no Vulkan.",
 	"authors": [
-		"Me!"
+		"duykingnew-afk"
+	],
+	"contributors": [
+		"Based on the idea of Super Resolution by 187J3X1-114514 (GPL-3.0)",
+		"FSR 1.0 EASU/RCAS algorithms by AMD (MIT)"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/duykingnew-afk/fabric-example-mod",
+		"sources": "https://github.com/duykingnew-afk/fabric-example-mod",
+		"issues": "https://github.com/duykingnew-afk/fabric-example-mod/issues"
 	},
-	"license": "CC0-1.0",
-	"icon": "assets/modid/icon.png",
-	"environment": "*",
+	"license": "GPL-3.0-or-later",
+	"icon": "assets/pocketfsr/icon.png",
+	"environment": "client",
 	"entrypoints": {
-		"main": [
-			"com.example.ExampleMod"
-		],
 		"client": [
-			"com.example.client.ExampleModClient"
+			"com.duykingnew.pocketfsr.PocketFsrClient"
 		]
 	},
 	"mixins": [
-		"modid.mixins.json",
 		{
-			"config": "modid.client.mixins.json",
+			"config": "pocketfsr.client.mixins.json",
 			"environment": "client"
 		}
 	],
 	"depends": {
-		"fabricloader": ">=0.20.1",
-		"minecraft": "~26.3",
-		"java": ">=25",
+		"fabricloader": ">=0.15.0",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
 		"fabric-api": "*"
 	}
 }

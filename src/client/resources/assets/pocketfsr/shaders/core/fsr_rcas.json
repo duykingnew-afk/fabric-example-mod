@@ -1,0 +1,13 @@
+{
+    "vertex": "pocketfsr:fsr_fullscreen",
+    "fragment": "pocketfsr:fsr_rcas",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "InSampler" }
+    ],
+    "uniforms": [
+        { "name": "Sharpness", "type": "float", "count": 1, "values": [ 1.0 ] }
+    ]
+}
