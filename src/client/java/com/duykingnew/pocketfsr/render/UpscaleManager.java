@@ -65,6 +65,8 @@ public final class UpscaleManager {
     private static boolean active;
     private static boolean failed;
     private static int lowFilter = -1;
+    /** Number of 3D world frames started so far (used by the CI smoke test to wait for fresh frames). */
+    private static long worldFrames;
 
     private UpscaleManager() {
     }
@@ -90,8 +92,13 @@ public final class UpscaleManager {
         return null;
     }
 
+    public static long worldFrames() {
+        return worldFrames;
+    }
+
     /** Called at the start of {@code GameRenderer.renderLevel}. */
     public static void beginWorld() {
+        worldFrames++;
         if (active || failed) {
             return;
         }

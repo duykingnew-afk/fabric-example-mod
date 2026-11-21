@@ -1,0 +1,64 @@
+# Starts the real Minecraft 1.21.1 client with the mod on a virtual display (software OpenGL),
+# creates a world, renders it natively and through every upscaling mode, and saves screenshots.
+# This catches mixin errors, shader compile errors and GL errors that a plain compile cannot.
+# The screenshots and the game log are attached to a rolling pre-release called "ci-smoke".
+
+name: smoketest
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - name: install virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libopenal1
+          xvfb-run -a -s "-screen 0 1280x720x24" glxinfo -B || true
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: prepare run directory
+        run: |
+          mkdir -p run
+          printf 'onboardAccessibility:false\ngraphicsMode:1\nrenderDistance:8\nguiScale:0\npauseOnLostFocus:false\ntutorialStep:none\nmaxFps:260\nenableVsync:false\nlang:en_us\n' > run/options.txt
+          printf 'eula=true\n' > run/eula.txt
+      - name: run the client
+        env:
+          POCKETFSR_SMOKETEST: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          MESA_GL_VERSION_OVERRIDE: '4.5'
+          MESA_GLSL_VERSION_OVERRIDE: '450'
+        run: |
+          set -o pipefail
+          xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew runClient --args="--width 1280 --height 720" 2>&1 | tee run/gradle-run.log
+      - name: show the mod's log lines
+        if: always()
+        run: |
+          grep -n -i "PocketFSR\|mixin\|shader\|exception\|error" run/logs/latest.log | head -150 || true
+          ls -la run/smoketest || true
+      - name: publish screenshots and log
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp run/logs/latest.log run/smoketest/game-latest.log 2>/dev/null || true
+          cp run/gradle-run.log run/smoketest/gradle-run.log 2>/dev/null || true
+          gh release delete ci-smoke --cleanup-tag -y || true
+          gh release create ci-smoke run/smoketest/* \
+            --prerelease --target "${GITHUB_SHA}" \
+            --title "CI smoke test (${GITHUB_SHA::7})" \
+            --notes "Screenshots and logs from the automatic render test of commit ${GITHUB_SHA}. Not a mod release."

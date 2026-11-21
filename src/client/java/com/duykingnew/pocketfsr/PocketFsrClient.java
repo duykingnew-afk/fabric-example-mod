@@ -16,6 +16,7 @@
 package com.duykingnew.pocketfsr;
 
 import com.duykingnew.pocketfsr.config.PocketFsrConfig;
+import com.duykingnew.pocketfsr.dev.SmokeTest;
 import com.duykingnew.pocketfsr.gui.PocketFsrScreen;
 import com.duykingnew.pocketfsr.render.FsrShaders;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -42,6 +43,11 @@ public final class PocketFsrClient implements ClientModInitializer {
     public void onInitializeClient() {
         PocketFsrConfig.load();
         FsrShaders.register(MOD_ID);
+
+        // Only the CI sets this variable; it drives an automatic render test (see SmokeTest).
+        if (System.getenv("POCKETFSR_SMOKETEST") != null) {
+            SmokeTest.install();
+        }
 
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.pocketfsr.toggle", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, "key.categories.pocketfsr"));
