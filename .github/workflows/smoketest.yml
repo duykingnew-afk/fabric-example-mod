@@ -22,8 +22,8 @@ jobs:
       - name: setup jdk
         uses: actions/setup-java@v5
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          java-version: '25'
+          distribution: 'microsoft'
       - name: install virtual display and software OpenGL
         run: |
           sudo apt-get update
@@ -55,6 +55,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          mkdir -p run/smoketest
           cp run/logs/latest.log run/smoketest/game-latest.log 2>/dev/null || true
           cp run/gradle-run.log run/smoketest/gradle-run.log 2>/dev/null || true
           gh release delete ci-smoke --cleanup-tag -y || true
