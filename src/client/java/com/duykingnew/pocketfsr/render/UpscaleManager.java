@@ -68,6 +68,10 @@ public final class UpscaleManager {
     /** Number of 3D world frames started so far (used by the CI smoke test to wait for fresh frames). */
     private static long worldFrames;
 
+    // --- diagnostics (only with the POCKETFSR_DEBUG_GL environment variable, used by the CI) ---
+    private static final boolean DEBUG_GL = System.getenv("POCKETFSR_DEBUG_GL") != null;
+    private static final java.util.Set<String> DEBUG_SEEN = new java.util.HashSet<>();
+
     private UpscaleManager() {
     }
 
@@ -94,6 +98,23 @@ public final class UpscaleManager {
 
     public static long worldFrames() {
         return worldFrames;
+    }
+
+    public static boolean isActive() {
+        return active;
+    }
+
+    /** Logs who changes the GL viewport / framebuffer while a world frame is being upscaled (CI diagnostics). */
+    public static void debugGl(String what, String args) {
+        if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 120) {
+            return;
+        }
+        String where = StackWalker.getInstance().walk(frames -> frames.skip(2).limit(7)
+                .map(f -> f.getClassName().replaceFirst("^net\\.minecraft\\.", "") + "." + f.getMethodName() + ":" + f.getLineNumber())
+                .collect(java.util.stream.Collectors.joining(" < ")));
+        if (DEBUG_SEEN.add(what + args + where)) {
+            LOGGER.info("[GLDEBUG] {} {} <- {}", what, args, where);
+        }
     }
 
     /** Called at the start of {@code GameRenderer.renderLevel}. */
@@ -124,6 +145,9 @@ public final class UpscaleManager {
             ((MinecraftAccessor) mc).pocketfsr$setMainRenderTarget(low);
             low.bindWrite(true);
             active = true;
+            if (DEBUG_GL && DEBUG_SEEN.size() < 5) {
+                LOGGER.info("[GLDEBUG] begin: main fb={} {}x{}, low fb={} {}x{}", main.frameBufferId, sw, sh, low.frameBufferId, rw, rh);
+            }
         } catch (Throwable t) {
             fail(t);
         }
