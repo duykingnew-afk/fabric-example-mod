@@ -104,6 +104,20 @@ public final class UpscaleManager {
         return active;
     }
 
+    /** Logs the real GL viewport and draw framebuffer at a named point of the world pass (CI diagnostics). */
+    public static void debugStage(String stage) {
+        if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 200) {
+            return;
+        }
+        int[] viewport = new int[4];
+        GL11.glGetIntegerv(GL11.GL_VIEWPORT, viewport);
+        int drawFramebuffer = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING);
+        String line = stage + " viewport " + viewport[0] + "," + viewport[1] + " " + viewport[2] + "x" + viewport[3] + " drawFb=" + drawFramebuffer;
+        if (DEBUG_SEEN.add(line)) {
+            LOGGER.info("[GLDEBUG] stage {}", line);
+        }
+    }
+
     /** Logs who changes the GL viewport / framebuffer while a world frame is being upscaled (CI diagnostics). */
     public static void debugGl(String what, String args) {
         if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 120) {
