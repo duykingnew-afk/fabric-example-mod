@@ -3,9 +3,7 @@
 	"package": "com.duykingnew.pocketfsr.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"GameRendererDebugMixin",
 		"GameRendererMixin",
-		"LevelRendererDebugMixin",
 		"LevelRendererMixin",
 		"MinecraftAccessor",
 		"RenderTargetMixin"

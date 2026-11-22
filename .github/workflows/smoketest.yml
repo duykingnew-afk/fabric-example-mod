@@ -39,7 +39,6 @@ jobs:
       - name: run the client
         env:
           POCKETFSR_SMOKETEST: '1'
-          POCKETFSR_DEBUG_GL: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
           MESA_GL_VERSION_OVERRIDE: '4.5'
           MESA_GLSL_VERSION_OVERRIDE: '450'
@@ -49,7 +48,7 @@ jobs:
       - name: show the mod's log lines
         if: always()
         run: |
-          grep -n "PocketFSR\|GLDEBUG\|mixin\|Exception" run/logs/latest.log | cut -c1-400 | head -200 || true
+          grep -n "PocketFSR\|mixin\|Exception" run/logs/latest.log | cut -c1-400 | head -200 || true
           ls -la run/smoketest || true
       - name: publish screenshots and log
         if: always()

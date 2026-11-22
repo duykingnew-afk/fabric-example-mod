@@ -23,6 +23,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
@@ -39,19 +40,50 @@ import java.nio.file.Path;
 
 /**
  * CI-only driver, active only when the environment variable {@code POCKETFSR_SMOKETEST} is set.
- * It creates a world, renders it natively and through each upscaling mode, saves screenshots to
- * {@code smoketest/} in the game directory, then quits. Never active for normal players.
+ * It creates a flat world with a small test scene (a block to point at, water, glass, a chest and a few
+ * mobs), renders it natively and through each upscaling mode, saves screenshots to {@code smoketest/} in the
+ * game directory, then quits. Never active for normal players.
  */
 public final class SmokeTest {
     private static final Logger LOGGER = LoggerFactory.getLogger("PocketFSR-SMOKE");
 
-    private enum Stage { WAIT_TITLE, WAIT_WORLD, SETTLE, NATIVE, FSR67, FSR, BILINEAR, DONE }
+    private record Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch) {
+    }
+
+    private static final float AHEAD = 0.0F;
+    private static final float SKY = -55.0F;
+    private static final Shot[] SHOTS = {
+            new Shot("native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("fsr67", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("fsr50", true, 0.5F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("bilinear50", true, 0.5F, PocketFsrConfig.Mode.BILINEAR, AHEAD),
+            new Shot("native-sky", false, 1.0F, PocketFsrConfig.Mode.FSR1, SKY),
+            new Shot("fsr67-sky", true, 0.67F, PocketFsrConfig.Mode.FSR1, SKY),
+    };
+
+    /** Commands run as the player; every position is relative to where the player stands, facing +Z. */
+    private static final String[] SCENE = {
+            "gamerule doDaylightCycle false",
+            "gamerule doWeatherCycle false",
+            "gamerule doMobSpawning false",
+            "time set noon",
+            "weather clear",
+            "fill ~-3 ~-1 ~6 ~3 ~-1 ~10 water",
+            "fill ~-5 ~ ~5 ~-3 ~2 ~5 light_blue_stained_glass",
+            "setblock ~ ~1 ~3 stone",
+            "setblock ~-1 ~ ~3 chest",
+            "summon pig ~-4 ~ ~7 {NoAI:1b}",
+            "summon pig ~2 ~ ~4 {NoAI:1b,Glowing:1b}",
+            "summon armor_stand ~4 ~ ~5",
+    };
+
+    private enum Stage { WAIT_TITLE, WAIT_WORLD, SETTLE, SHOOT, DONE }
 
     private static Stage stage = Stage.WAIT_TITLE;
     private static int stageTicks;
+    private static int shotIndex;
     private static long frameMark;
-    private static boolean shotPending;
-    private static long startNanos = System.nanoTime();
+    private static final long START_NANOS = System.nanoTime();
 
     private SmokeTest() {
     }
@@ -69,7 +101,7 @@ public final class SmokeTest {
 
     private static void onTick(Minecraft mc) {
         stageTicks++;
-        if ((System.nanoTime() - startNanos) / 1_000_000_000L > 14 * 60) {
+        if ((System.nanoTime() - START_NANOS) / 1_000_000_000L > 14 * 60) {
             LOGGER.error("smoke test timed out in stage {}", stage);
             System.exit(3);
         }
@@ -87,36 +119,33 @@ public final class SmokeTest {
                     }
                 }
                 case SETTLE -> {
-                    // let the first chunks load and mesh
                     if (stageTicks == 1) {
-                        mc.player.setXRot(22.0F); // looks at the ground within reach, so the block outline is drawn
+                        mc.player.setYRot(0.0F);
+                        mc.player.yRotO = 0.0F;
+                        for (String command : SCENE) {
+                            mc.player.connection.sendCommand(command);
+                        }
                     }
+                    // let the chunks load and mesh, the commands run and the chat messages fade
                     if (stageTicks > 20 * 25) {
-                        PocketFsrConfig.get().enabled = false;
-                        begin(mc, Stage.NATIVE);
+                        startShot(mc);
+                        next(Stage.SHOOT);
                     }
                 }
-                case NATIVE -> shoot(mc, "native", () -> {
-                    PocketFsrConfig cfg = PocketFsrConfig.get();
-                    cfg.enabled = true;
-                    cfg.scale = 0.67F;
-                    cfg.mode = PocketFsrConfig.Mode.FSR1;
-                    cfg.sharpness = 0.8F;
-                    begin(mc, Stage.FSR67);
-                });
-                case FSR67 -> shoot(mc, "fsr67", () -> {
-                    PocketFsrConfig.get().scale = 0.5F;
-                    begin(mc, Stage.FSR);
-                });
-                case FSR -> shoot(mc, "fsr50", () -> {
-                    PocketFsrConfig.get().mode = PocketFsrConfig.Mode.BILINEAR;
-                    begin(mc, Stage.BILINEAR);
-                });
-                case BILINEAR -> shoot(mc, "bilinear50", () -> {
-                    next(Stage.DONE);
-                    LOGGER.info("SMOKETEST DONE");
-                    mc.stop();
-                });
+                case SHOOT -> {
+                    if (UpscaleManager.worldFrames() < frameMark + 8) {
+                        return;
+                    }
+                    saveShot(mc, SHOTS[shotIndex]);
+                    shotIndex++;
+                    if (shotIndex < SHOTS.length) {
+                        startShot(mc);
+                    } else {
+                        next(Stage.DONE);
+                        LOGGER.info("SMOKETEST DONE");
+                        mc.stop();
+                    }
+                }
                 default -> {
                 }
             }
@@ -126,34 +155,38 @@ public final class SmokeTest {
         }
     }
 
-    private static void begin(Minecraft mc, Stage to) {
+    /** Applies the settings of the next shot; the screenshot is taken after a few fresh world frames. */
+    private static void startShot(Minecraft mc) {
+        Shot shot = SHOTS[shotIndex];
+        PocketFsrConfig cfg = PocketFsrConfig.get();
+        cfg.enabled = shot.enabled();
+        cfg.scale = shot.scale();
+        cfg.mode = shot.mode();
+        cfg.sharpness = 0.8F;
+        mc.player.setXRot(shot.pitch());
+        mc.player.xRotO = shot.pitch();
         frameMark = UpscaleManager.worldFrames();
-        shotPending = true;
-        next(to);
     }
 
-    /** Waits for a few fresh world frames with the current settings, saves a screenshot, then runs {@code then}. */
-    private static void shoot(Minecraft mc, String name, Runnable then) throws Exception {
-        if (!shotPending || UpscaleManager.worldFrames() < frameMark + 8) {
-            return;
-        }
-        shotPending = false;
+    private static void saveShot(Minecraft mc, Shot shot) throws Exception {
         int glError = GL11.glGetError();
-        LOGGER.info("{}: frames={}, GL error=0x{}, blocked={}", name, UpscaleManager.worldFrames(),
+        LOGGER.info("{}: frames={}, GL error=0x{}, blocked={}", shot.name(), UpscaleManager.worldFrames(),
                 Integer.toHexString(glError), UpscaleManager.blockedKey());
         Path dir = mc.gameDirectory.toPath().resolve("smoketest");
         Files.createDirectories(dir);
         try (NativeImage image = Screenshot.takeScreenshot(mc.getMainRenderTarget())) {
-            image.writeToFile(dir.resolve(name + ".png"));
-            LOGGER.info("saved {}.png ({}x{})", name, image.getWidth(), image.getHeight());
+            image.writeToFile(dir.resolve(shot.name() + ".png"));
+            LOGGER.info("saved {}.png ({}x{})", shot.name(), image.getWidth(), image.getHeight());
         }
-        then.run();
     }
 
     private static void createWorld(Minecraft mc) {
         LevelSettings settings = new LevelSettings("pocketfsr-smoke", GameType.CREATIVE, false, Difficulty.PEACEFUL,
                 true, new GameRules(), WorldDataConfiguration.DEFAULT);
         mc.createWorldOpenFlows().createFreshLevel("pocketfsr-smoke-" + System.currentTimeMillis(), settings,
-                new WorldOptions(20260101L, false, false), WorldPresets::createNormalWorldDimensions, mc.screen);
+                new WorldOptions(20260101L, false, false),
+                registries -> registries.registryOrThrow(Registries.WORLD_PRESET)
+                        .getHolderOrThrow(WorldPresets.FLAT).value().createWorldDimensions(),
+                mc.screen);
     }
 }

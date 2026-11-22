@@ -73,10 +73,6 @@ public final class UpscaleManager {
     /** Number of 3D world frames started so far (used by the CI smoke test to wait for fresh frames). */
     private static long worldFrames;
 
-    // --- diagnostics (only with the POCKETFSR_DEBUG_GL environment variable, used by the CI) ---
-    private static final boolean DEBUG_GL = System.getenv("POCKETFSR_DEBUG_GL") != null;
-    private static final java.util.Set<String> DEBUG_SEEN = new java.util.HashSet<>();
-
     private UpscaleManager() {
     }
 
@@ -120,20 +116,6 @@ public final class UpscaleManager {
      */
     public static boolean outlinesSuppressed() {
         return outlinesSuppressed;
-    }
-
-    /** Logs the real GL viewport and draw framebuffer at a named point of the world pass (CI diagnostics). */
-    public static void debugStage(String stage) {
-        if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 200) {
-            return;
-        }
-        int[] viewport = new int[4];
-        GL11.glGetIntegerv(GL11.GL_VIEWPORT, viewport);
-        int drawFramebuffer = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING);
-        String line = stage + " viewport " + viewport[0] + "," + viewport[1] + " " + viewport[2] + "x" + viewport[3] + " drawFb=" + drawFramebuffer;
-        if (DEBUG_SEEN.add(line)) {
-            LOGGER.info("[GLDEBUG] stage {}", line);
-        }
     }
 
     /** Called at the start of {@code GameRenderer.renderLevel}. */
