@@ -23,7 +23,7 @@ jobs:
         run: chmod +x ./gradlew
       - name: build
         run: ./gradlew build
-      - name: show the packaged mod (files, mixin config and refmap)
+      - name: show the packaged mod (files, mixin config, remapped names)
         run: |
           JAR=$(ls build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n 1)
           echo "== $JAR"
@@ -32,6 +32,11 @@ jobs:
             echo "== $f"
             unzip -p "$JAR" "$f"
             echo
+          done
+          # Loom 1.19 remaps the mixins inside the classes (no refmap file), so the intermediary names must be there
+          for c in $(unzip -Z1 "$JAR" | grep -E 'pocketfsr/mixin/.*\.class$'); do
+            echo "== $c"
+            unzip -p "$JAR" "$c" | strings | grep -E 'class_[0-9]+|method_[0-9]+|field_[0-9]+' | sort -u
           done
       - name: capture build artifacts
         uses: actions/upload-artifact@v7
