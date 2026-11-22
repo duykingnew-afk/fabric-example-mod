@@ -45,7 +45,7 @@ import java.nio.file.Path;
 public final class SmokeTest {
     private static final Logger LOGGER = LoggerFactory.getLogger("PocketFSR-SMOKE");
 
-    private enum Stage { WAIT_TITLE, WAIT_WORLD, SETTLE, NATIVE, FSR, BILINEAR, DONE }
+    private enum Stage { WAIT_TITLE, WAIT_WORLD, SETTLE, NATIVE, FSR67, FSR, BILINEAR, DONE }
 
     private static Stage stage = Stage.WAIT_TITLE;
     private static int stageTicks;
@@ -89,7 +89,7 @@ public final class SmokeTest {
                 case SETTLE -> {
                     // let the first chunks load and mesh
                     if (stageTicks == 1) {
-                        mc.player.setXRot(12.0F);
+                        mc.player.setXRot(22.0F); // looks at the ground within reach, so the block outline is drawn
                     }
                     if (stageTicks > 20 * 25) {
                         PocketFsrConfig.get().enabled = false;
@@ -99,9 +99,13 @@ public final class SmokeTest {
                 case NATIVE -> shoot(mc, "native", () -> {
                     PocketFsrConfig cfg = PocketFsrConfig.get();
                     cfg.enabled = true;
-                    cfg.scale = 0.5F;
+                    cfg.scale = 0.67F;
                     cfg.mode = PocketFsrConfig.Mode.FSR1;
                     cfg.sharpness = 0.8F;
+                    begin(mc, Stage.FSR67);
+                });
+                case FSR67 -> shoot(mc, "fsr67", () -> {
+                    PocketFsrConfig.get().scale = 0.5F;
                     begin(mc, Stage.FSR);
                 });
                 case FSR -> shoot(mc, "fsr50", () -> {

@@ -16,22 +16,23 @@
 package com.duykingnew.pocketfsr.mixin;
 
 import com.duykingnew.pocketfsr.render.UpscaleManager;
-import com.mojang.blaze3d.platform.GlStateManager;
+import net.minecraft.client.renderer.LevelRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Diagnostics only: reports viewport and framebuffer changes during an upscaled world frame. */
-@Mixin(GlStateManager.class)
-public abstract class GlStateManagerDebugMixin {
-    @Inject(method = "_viewport", at = @At("HEAD"))
-    private static void pocketfsr$viewport(int x, int y, int width, int height, CallbackInfo ci) {
-        UpscaleManager.debugGl("viewport", x + "," + y + " " + width + "x" + height);
-    }
-
-    @Inject(method = "_glBindFramebuffer", at = @At("HEAD"))
-    private static void pocketfsr$bindFramebuffer(int target, int framebuffer, CallbackInfo ci) {
-        UpscaleManager.debugGl("bindFramebuffer", "target=" + target + " fb=" + framebuffer);
+@Mixin(LevelRenderer.class)
+public abstract class LevelRendererMixin {
+    /**
+     * Glowing-entity outlines go through a second, window-sized render target that the game clears, fills and
+     * blits itself. It cannot line up with the smaller world target, so no outlines are drawn while the world
+     * is upscaled (the entities themselves are still drawn normally).
+     */
+    @Inject(method = "shouldShowEntityOutlines", at = @At("HEAD"), cancellable = true)
+    private void pocketfsr$noOutlinesWhileUpscaling(CallbackInfoReturnable<Boolean> cir) {
+        if (UpscaleManager.outlinesSuppressed()) {
+            cir.setReturnValue(false);
+        }
     }
 }

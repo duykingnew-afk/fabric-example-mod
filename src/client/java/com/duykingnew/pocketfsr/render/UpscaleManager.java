@@ -64,6 +64,11 @@ public final class UpscaleManager {
     private static RenderTarget screenTarget;
     private static boolean active;
     private static boolean failed;
+    /**
+     * True from the start of an upscaled world frame until the next world frame decides otherwise, so it also
+     * covers {@code LevelRenderer.doEntityOutline}, which the game runs just after {@code renderLevel}.
+     */
+    private static boolean outlinesSuppressed;
     private static int lowFilter = -1;
     /** Number of 3D world frames started so far (used by the CI smoke test to wait for fresh frames). */
     private static long worldFrames;
@@ -104,6 +109,19 @@ public final class UpscaleManager {
         return active;
     }
 
+    /** True while {@code target} is standing in for the game's main render target during an upscaled frame. */
+    public static boolean isLowTarget(RenderTarget target) {
+        return active && target == lowTarget;
+    }
+
+    /**
+     * Glowing-entity outlines are drawn into a second, window-sized target by the game. That cannot line up with
+     * the smaller world target, so they are switched off for upscaled frames (see {@code LevelRendererMixin}).
+     */
+    public static boolean outlinesSuppressed() {
+        return outlinesSuppressed;
+    }
+
     /** Logs the real GL viewport and draw framebuffer at a named point of the world pass (CI diagnostics). */
     public static void debugStage(String stage) {
         if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 200) {
@@ -118,23 +136,14 @@ public final class UpscaleManager {
         }
     }
 
-    /** Logs who changes the GL viewport / framebuffer while a world frame is being upscaled (CI diagnostics). */
-    public static void debugGl(String what, String args) {
-        if (!DEBUG_GL || !active || DEBUG_SEEN.size() > 120) {
-            return;
-        }
-        String where = StackWalker.getInstance().walk(frames -> frames.skip(2).limit(7)
-                .map(f -> f.getClassName().replaceFirst("^net\\.minecraft\\.", "") + "." + f.getMethodName() + ":" + f.getLineNumber())
-                .collect(java.util.stream.Collectors.joining(" < ")));
-        if (DEBUG_SEEN.add(what + args + where)) {
-            LOGGER.info("[GLDEBUG] {} {} <- {}", what, args, where);
-        }
-    }
-
     /** Called at the start of {@code GameRenderer.renderLevel}. */
     public static void beginWorld() {
         worldFrames++;
-        if (active || failed) {
+        if (active) {
+            return; // nested call: the outer one owns the swap
+        }
+        outlinesSuppressed = false;
+        if (failed) {
             return;
         }
         try {
@@ -159,9 +168,7 @@ public final class UpscaleManager {
             ((MinecraftAccessor) mc).pocketfsr$setMainRenderTarget(low);
             low.bindWrite(true);
             active = true;
-            if (DEBUG_GL && DEBUG_SEEN.size() < 5) {
-                LOGGER.info("[GLDEBUG] begin: main fb={} {}x{}, low fb={} {}x{}", main.frameBufferId, sw, sh, low.frameBufferId, rw, rh);
-            }
+            outlinesSuppressed = true;
         } catch (Throwable t) {
             fail(t);
         }
@@ -312,6 +319,7 @@ public final class UpscaleManager {
     private static void fail(Throwable t) {
         failed = true;
         active = false;
+        outlinesSuppressed = false;
         LOGGER.error("Pocket FSR hit an error and switched itself off until the game is restarted", t);
         RenderTarget screen = screenTarget;
         screenTarget = null;
