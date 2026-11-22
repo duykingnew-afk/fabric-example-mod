@@ -1,7 +1,8 @@
-# Builds the mod and attaches the jar to a GitHub Release whenever a version tag is pushed.
+# Builds the mod and attaches the jar to a GitHub pre-release. It runs when a version tag is pushed:
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
+# or by hand: GitHub -> Actions -> release -> "Run workflow" (it creates the tag for you).
 # Releases are marked "pre-release" until the mod has been tested on real devices.
 
 name: release
@@ -9,6 +10,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to create, for example v0.1.0'
+        required: true
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -31,10 +38,13 @@ jobs:
       - name: publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           JAR=$(ls build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n 1)
-          echo "Publishing $JAR"
-          gh release create "${GITHUB_REF_NAME}" "$JAR" \
-            --title "Pocket FSR ${GITHUB_REF_NAME}" \
-            --prerelease \
-            --notes "Pocket FSR for Minecraft 1.21.1 (Fabric). Put the .jar in your mods folder together with Fabric API. See the README for usage and known limits."
+          echo "Publishing $JAR as $TAG"
+          NOTES="Pocket FSR for Minecraft 1.21.1 (Fabric): draws the 3D world at a lower resolution and upscales it with FSR 1.0. Put the .jar in your mods folder together with Fabric API (needs Fabric Loader for 1.21.1). Experimental: tested by an automatic desktop run, not yet on a real phone or tablet. See the README for usage and known limits."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$JAR" --clobber
+          else
+            gh release create "$TAG" "$JAR" --target "$GITHUB_SHA" --title "Pocket FSR $TAG" --prerelease --notes "$NOTES"
+          fi

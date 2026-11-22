@@ -23,6 +23,16 @@ jobs:
         run: chmod +x ./gradlew
       - name: build
         run: ./gradlew build
+      - name: show the packaged mod (files, mixin config and refmap)
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -- '-sources' | grep -v -- '-dev' | head -n 1)
+          echo "== $JAR"
+          unzip -l "$JAR"
+          for f in $(unzip -Z1 "$JAR" | grep -E 'refmap\.json$|mixins\.json$'); do
+            echo "== $f"
+            unzip -p "$JAR" "$f"
+            echo
+          done
       - name: capture build artifacts
         uses: actions/upload-artifact@v7
         with:
