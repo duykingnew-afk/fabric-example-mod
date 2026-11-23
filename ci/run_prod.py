@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -31,29 +32,66 @@ OPTIONS_TXT = (
 )
 
 
+class NotFound(Exception):
+    pass
+
+
 def http(url, attempts=4):
     for attempt in range(1, attempts + 1):
         try:
             request = urllib.request.Request(url, headers={"User-Agent": "pocketfsr-ci (github.com/duykingnew-afk/fabric-example-mod)"})
             with urllib.request.urlopen(request, timeout=120) as response:
                 return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                raise NotFound(url) from error
+            print(f"download failed ({error}), attempt {attempt}/{attempts}", flush=True)
         except Exception as error:  # noqa: BLE001 - retry on any network problem
             print(f"download failed ({error}), attempt {attempt}/{attempts}", flush=True)
-            time.sleep(5 * attempt)
+        time.sleep(5 * attempt)
     raise SystemExit(f"could not download {url}")
 
 
-def modrinth_pick(spec):
+def resolve_project(slug):
+    """The slug itself if Modrinth knows it, else the best match of a search among shader packs."""
+    try:
+        http(f"https://api.modrinth.com/v2/project/{slug}")
+        return slug
+    except NotFound:
+        pass
+    query = urllib.parse.urlencode({
+        "query": slug.replace("-", " "),
+        "facets": json.dumps([["project_type:shader"]]),
+        "limit": 5,
+    })
+    hits = json.loads(http(f"https://api.modrinth.com/v2/search?{query}"))["hits"]
+    print(f"no project '{slug}'; shader pack search results:", flush=True)
+    for hit in hits:
+        print(f"    {hit['slug']:<40} {hit['title']!r} ({hit['downloads']} downloads)", flush=True)
+    if not hits:
+        raise SystemExit(f"nothing found for '{slug}'")
+    return hits[0]["slug"]
+
+
+def modrinth_versions(slug, loader):
+    """All versions of a Modrinth project for the loader, newest first (for 1.21.1 if any are tagged so)."""
+    def query(with_game_version):
+        params = {"loaders": json.dumps([loader])}
+        if with_game_version:
+            params["game_versions"] = json.dumps([MC_VERSION])
+        return json.loads(http(f"https://api.modrinth.com/v2/project/{slug}/version?{urllib.parse.urlencode(params)}"))
+
+    versions = query(True) or query(False)  # shader packs are often not tagged with every game version
+    if not versions:
+        raise SystemExit(f"no {slug} found for loader {loader}")
+    versions.sort(key=lambda v: v["date_published"], reverse=True)
+    return versions
+
+
+def modrinth_pick(spec, loader="fabric"):
     """`slug` or `slug=version_number` -> (slug, version_number, download url, file name)."""
     slug, _, pinned = spec.partition("=")
-    query = urllib.parse.urlencode({
-        "loaders": json.dumps(["fabric"]),
-        "game_versions": json.dumps([MC_VERSION]),
-    })
-    versions = json.loads(http(f"https://api.modrinth.com/v2/project/{slug}/version?{query}"))
-    if not versions:
-        raise SystemExit(f"no {slug} for Minecraft {MC_VERSION} on Fabric")
-    versions.sort(key=lambda v: v["date_published"], reverse=True)
+    versions = modrinth_versions(slug, loader)
     print(f"{slug}: newest versions:", flush=True)
     for v in versions[:6]:
         print(f"    {v['version_number']:<40} {v['version_type']:<8} {v['date_published'][:10]}", flush=True)
@@ -108,6 +146,23 @@ def run(args):
         print(f"using {slug} {version}", flush=True)
         with open(os.path.join(game, "mods", filename), "wb") as out:
             out.write(http(url))
+    pack_name = None
+    if args.shaderpack:
+        pack_name = "pocketfsr-test"
+        shutil.copytree(args.shaderpack, os.path.join(game, "shaderpacks", pack_name))
+        used.append("shader pack: ci/shaderpack (small test pack)")
+    elif args.shaderpack_modrinth:
+        slug, version, url, filename = modrinth_pick(resolve_project(args.shaderpack_modrinth), loader="iris")
+        os.makedirs(os.path.join(game, "shaderpacks"))
+        with open(os.path.join(game, "shaderpacks", filename), "wb") as out:
+            out.write(http(url))
+        pack_name = filename
+        used.append(f"shader pack: {slug} {version} ({filename})")
+        print(f"using shader pack {slug} {version}", flush=True)
+    if pack_name:
+        os.makedirs(os.path.join(game, "config"), exist_ok=True)
+        with open(os.path.join(game, "config", "iris.properties"), "w") as out:
+            out.write(f"enableShaders=true\nshaderPack={pack_name}\n")
     used.append(f"pocketfsr ({os.path.basename(args.mod_jar)})")
     with open(os.path.join(game, "mods-used.txt"), "w") as out:
         out.write("\n".join(used) + "\n")
@@ -116,11 +171,6 @@ def run(args):
         out.write(OPTIONS_TXT)
     with open(os.path.join(game, "eula.txt"), "w") as out:
         out.write("eula=true\n")
-    if args.shaderpack:
-        shutil.copytree(args.shaderpack, os.path.join(game, "shaderpacks", "pocketfsr-test"))
-        os.makedirs(os.path.join(game, "config"), exist_ok=True)
-        with open(os.path.join(game, "config", "iris.properties"), "w") as out:
-            out.write("enableShaders=true\nshaderPack=pocketfsr-test\n")
 
     options = {
         "username": "PocketFsr",
@@ -182,7 +232,8 @@ def main():
     run_parser.add_argument("--game-dir", required=True)
     run_parser.add_argument("--mod-jar", required=True)
     run_parser.add_argument("--mods", nargs="*", default=[])
-    run_parser.add_argument("--shaderpack")
+    run_parser.add_argument("--shaderpack", help="folder of a shader pack to copy in")
+    run_parser.add_argument("--shaderpack-modrinth", help="slug of a shader pack to download from Modrinth")
     run_parser.add_argument("--prefix", default="")
     run_parser.add_argument("--java", default="java")
     run_parser.add_argument("--timeout", type=int, default=900)

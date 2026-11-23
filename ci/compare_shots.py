@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """CI helper: compares the screenshots of one smoke test run.
 
-  python ci/compare_shots.py prod/iris/smoketest iris-
+  python ci/compare_shots.py prod/iris/smoketest iris-            (exit 1 if a pair is too different)
+  python ci/compare_shots.py prod/iris/smoketest iris- --report-only
 
 The same scene from the same spot must look the same however often the upscaling was switched on and off in
 between, and an upscaled picture must stay close to the native one. Prints the mean absolute difference per
@@ -34,7 +35,9 @@ def difference(path_a, path_b):
 
 
 def main():
-    directory, prefix = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else ""
+    arguments = [a for a in sys.argv[1:] if not a.startswith("--")]
+    report_only = "--report-only" in sys.argv
+    directory, prefix = arguments[0], arguments[1] if len(arguments) > 1 else ""
     bad = 0
     print(f"{'picture':<14} {'compared with':<14} {'difference':>10} {'allowed':>8}  what")
     for name, reference, allowed, what in CHECKS:
@@ -56,7 +59,7 @@ def main():
                 verdict = "TOO DIFFERENT"
                 bad += 1
         print(f"{name:<14} {reference:<14} {shown:>10} {allowed:>8}  {what}  [{verdict}]")
-    sys.exit(1 if bad else 0)
+    sys.exit(0 if report_only else (1 if bad else 0))
 
 
 if __name__ == "__main__":

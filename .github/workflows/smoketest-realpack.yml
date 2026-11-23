@@ -1,0 +1,98 @@
+# The same real-game test as smoketest-iris.yml, but with a real shader pack from Modrinth instead of the tiny
+# test pack, to see how Pocket FSR behaves with something closer to what players use.
+# Screenshots and logs go to a rolling pre-release called "ci-realpack". Informational: it does not block anything.
+
+name: smoketest-realpack
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smoketest-realpack
+  cancel-in-progress: false
+
+jobs:
+  smoke-realpack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk (25 builds the mod, 21 runs the game like a phone launcher does)
+        uses: actions/setup-java@v5
+        with:
+          java-version: |
+            21
+            25
+          distribution: 'microsoft'
+      - name: install virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libopenal1
+      - name: build the mod jar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build
+      - name: install Minecraft 1.21.1 and Fabric Loader
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install minecraft-launcher-lib pillow
+          .venv/bin/python ci/run_prod.py install
+      - name: run with Sodium, Iris and a real shader pack
+        id: realpack
+        continue-on-error: true
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -e '-sources' -e '-dev' | head -n 1)
+          .venv/bin/python ci/run_prod.py run --game-dir prod/realpack --mod-jar "$JAR" \
+            --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium iris \
+            --shaderpack-modrinth makeup-ultra-fast --prefix realpack- --timeout 1500
+      - name: compare the screenshots
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          .venv/bin/python ci/compare_shots.py prod/realpack/smoketest realpack- --report-only | tee out/compare.txt
+      - name: show the interesting log lines
+        if: always()
+        run: |
+          cat prod/realpack/mods-used.txt 2>/dev/null || true
+          LOG=prod/realpack/logs/latest.log
+          [ -e "$LOG" ] || LOG=prod/realpack/launcher-output.log
+          grep -n "PocketFSR\|Iris\|Sodium\|mixin\|Mixin\|Exception\|ERROR\|FATAL\|OpenGL debug\|shader" "$LOG" | cut -c1-300 | head -200 || true
+          ls -la prod/realpack/smoketest prod/realpack/crash-reports 2>/dev/null || true
+      - name: publish screenshots and logs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          cp prod/realpack/smoketest/*.png out/ 2>/dev/null || true
+          cp prod/realpack/logs/latest.log out/realpack-game-latest.log 2>/dev/null || true
+          cp prod/realpack/launcher-output.log out/realpack-launcher-output.log 2>/dev/null || true
+          cp prod/realpack/mods-used.txt out/realpack-mods-used.txt 2>/dev/null || true
+          for crash in prod/realpack/crash-reports/*.txt; do
+            [ -e "$crash" ] || continue
+            cp "$crash" "out/realpack-$(basename "$crash")"
+          done
+          ls -la out
+          NOTES="Screenshots and logs of the automatic render test on the real game with Sodium, Iris and a real shader pack from Modrinth, commit ${GITHUB_SHA}. Not a mod release. Used: $(tr '\n' ';' < prod/realpack/mods-used.txt 2>/dev/null)"
+          for attempt in 1 2 3; do
+            gh release delete ci-realpack --cleanup-tag -y || true
+            if gh release create ci-realpack out/* \
+                --prerelease --target "${GITHUB_SHA}" \
+                --title "Real shader pack test (${GITHUB_SHA::7})" \
+                --notes "$NOTES"; then
+              break
+            fi
+            echo "creating the release failed (attempt ${attempt}), trying again"
+            sleep 15
+          done
+          gh release view ci-realpack > /dev/null
+      - name: report
+        if: always()
+        run: |
+          echo "run with a real shader pack: ${{ steps.realpack.outcome }}"

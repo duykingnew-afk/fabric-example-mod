@@ -8,10 +8,10 @@ vẫn vẽ ở độ phân giải gốc nên chữ vẫn nét.
 > FSR 1.0 style filter (EASU + RCAS) written in plain OpenGL. The GUI stays at native resolution.
 > No native libraries and no Vulkan, so it can run through the GL translation layers used by mobile launchers.
 
-**Trạng thái: thử nghiệm.** Mỗi lần push, GitHub Actions chạy thật game 1.21.1 với mod trên Linux (OpenGL phần mềm),
-dựng thế giới thử, chụp ảnh khi tắt/bật upscale và kiểm tra không có lỗi GL (xem mục *Kiểm thử tự động*). Tuy nhiên mod
-**chưa được thử trên iPhone/iPad/Android thật** (qua lớp dịch GL của launcher di động như MobileGlues, GL4ES...), nên có thể
-còn lỗi riêng của thiết bị. Nếu bị lỗi, gửi file `logs/latest.log` ở trong issue.
+**Trạng thái: thử nghiệm.** Mỗi lần push, GitHub Actions chạy thật game 1.21.1 + Fabric trên Linux (OpenGL phần mềm), dựng thế giới thử,
+chụp ảnh khi tắt/bật upscale, bật/tắt nhiều lần rồi so sánh ảnh với nhau; làm cả khi chỉ có Sodium và khi có **Iris + shader pack**
+(xem mục *Kiểm thử tự động*). Tuy nhiên mod **chưa được thử trên iPhone/iPad/Android thật** (qua lớp dịch GL của launcher di động như
+MobileGlues, GL4ES...), nên có thể còn lỗi riêng của thiết bị. Nếu bị lỗi, gửi file `logs/latest.log` ở trong issue.
 
 ![Gốc / FSR 67% / FSR 50% / Bilinear 50%](docs/compare.png)
 
@@ -21,6 +21,8 @@ còn lỗi riêng của thiết bị. Nếu bị lỗi, gửi file `logs/latest.
 ## Cài đặt
 
 1. Cài Fabric Loader cho 1.21.1 và [Fabric API](https://modrinth.com/mod/fabric-api).
+   Muốn dùng shader: cài thêm [Sodium](https://modrinth.com/mod/sodium) và [Iris](https://modrinth.com/mod/iris) (bản cho 1.21.1),
+   mod tự nhận ra Iris, không cần cấu hình gì thêm.
 2. Tải file `pocketfsr-0.1.0.jar` rồi bỏ vào thư mục `mods`:
    - bản phát hành chính thức ở mục **Releases** (khi có), hoặc
    - bản build thử mới nhất ở pre-release **ci-smoke** (cùng mục Releases; được thay mới sau mỗi lần push vào `main`).
@@ -36,11 +38,15 @@ còn lỗi riêng của thiết bị. Nếu bị lỗi, gửi file `logs/latest.
 | Tỉ lệ render thế giới | 25% – 100%. Gợi ý: 67% (Quality), 59% (Balanced), 50% (Performance), 33% (Ultra Performance) |
 | Phương pháp | `FSR 1.0` (đẹp hơn) hoặc `Bilinear` (nhanh nhất) |
 | Độ sắc nét | RCAS, 0% = tắt |
+| Chạy cùng shader (Iris) | Chỉ hiện khi đã cài Iris. BẬT (mặc định): vẫn nâng độ phân giải khi dùng shader pack. TẮT: mod đứng yên khi có Iris (dùng nếu một shader pack bị lỗi hình). Trong file: `allowWithIris` |
 
 ## Giới hạn đã biết
 
 - Đồ họa **Fabulous** chưa hỗ trợ: mod tự tắt, hãy dùng Fast hoặc Fancy.
-- **Iris** / shader pack: không tương thích, mod tự tắt.
+- **Iris / shader pack**: chạy được. Đã thử trên CI với Sodium + Iris + một shader pack nhỏ tự viết (xem *Kiểm thử tự động*); chưa thử
+  với từng shader pack lớn, và chưa thử trên điện thoại. Điện thoại có chạy nổi Iris hay không còn tùy lớp OpenGL của launcher
+  (Iris cần OpenGL khá mới), mod này không thay đổi điều đó. Shader pack lỗi hình thì tắt "Chạy cùng shader (Iris)".
+- Với Iris, đồ họa **Fabulous** vẫn bị coi là không hỗ trợ (mod tự tắt): hãy chọn Fancy.
 - Viền phát sáng (hiệu ứng Glowing, mũi tên Spectral, viền người chơi ở chế độ spectator) **không được vẽ** khi đang nâng độ phân giải:
   game vẽ viền vào một target riêng cỡ cửa sổ, không khớp với target nhỏ. Thực thể vẫn hiển thị bình thường.
 - FSR 1.0 chỉ là lọc không gian (không dùng dữ liệu các frame trước), nên ở tỉ lệ rất thấp ảnh sẽ mềm.
@@ -61,17 +67,37 @@ Hai mixin phụ giữ cho khung hình đúng khi target nhỏ đóng vai "main t
   (cỡ cửa sổ), viewport bị để ở cỡ cửa sổ và nước, mây, tay, khung chọn block bị phóng to / cắt mất.
 - `LevelRenderer.shouldShowEntityOutlines`: tắt viền phát sáng trong khung hình được upscale.
 
+### Chạy cùng Iris
+
+Iris lấy kích thước các bộ đệm của nó từ `Minecraft.getMainRenderTarget()`. Vì mod đã thay target đó bằng target nhỏ trước khi vẽ thế giới,
+Iris tự vẽ shader pack ở độ phân giải thấp, ghi ảnh cuối vào target nhỏ, rồi mod nâng lên màn hình như bình thường.
+
+Chỗ phải xử lý riêng: Iris biết "bộ đệm độ sâu đã đổi chưa" chỉ bằng một **bộ đếm phiên bản** gắn với mỗi render target
+(`iris$getDepthBufferVersion()`), không so sánh chính texture. Target nhỏ của mod và target thật của game đều đếm từ 0, nên sau vài lần đổi cỡ
+hai số có thể trùng nhau; Iris khi đó giữ nhầm bộ đệm độ sâu của target kia: khung hình vỡ và log đầy
+`GL_INVALID_VALUE in glCopyImageSubData`. Lỗi này lộ ra ngay khi tắt upscale lúc đang dùng shader. `WorldTarget` (target nhỏ của mod)
+vì vậy trả về số phiên bản trong một dải mà target thật không bao giờ chạm tới, và tăng sau mỗi lần đổi cỡ.
+
 Shader nằm ở `src/client/resources/assets/pocketfsr/shaders/core/` (GLSL 1.50, không dùng `textureGather`
 nên chạy được trên các lớp dịch GL của launcher di động).
 
 ## Kiểm thử tự động
 
-`.github/workflows/smoketest.yml` chạy game thật dưới Xvfb + Mesa (OpenGL phần mềm), tạo thế giới phẳng có sẵn một cảnh thử
-(khối đá đang nhắm vào, nước, kính màu, rương, mob, bầu trời và mây), rồi chụp ảnh ở các chế độ: gốc, FSR 67%, FSR 50%,
-Bilinear 50% và nhìn lên trời. Kết quả (ảnh + log, kèm file jar vừa build) được đăng ở pre-release `ci-smoke`. Test sẽ lỗi nếu mixin không áp dụng được,
-shader không biên dịch được hoặc có lỗi GL.
+Ba workflow chạy game thật dưới Xvfb + Mesa (OpenGL phần mềm), tạo thế giới phẳng có sẵn một cảnh thử (khối đá đang nhắm vào, nước,
+kính màu, rương, mob, bầu trời và mây), rồi chụp ảnh: gốc, FSR 67%, FSR 50%, Bilinear 50%, nhìn lên trời, và thêm vài lần bật/tắt/đổi cỡ.
+Test lỗi nếu mixin không áp dụng được, shader không biên dịch được, có lỗi GL, hoặc ảnh sau khi bật/tắt khác ảnh ban đầu
+(`ci/compare_shots.py`: so từng cặp ảnh, độ lệch trung bình mỗi kênh màu phải nhỏ).
 
-Lỗi nhìn thấy được (như tay bị mất, khung block lệch) là loại lỗi mà test này bắt được; lỗi chỉ xảy ra trên GPU/lớp dịch GL
+| Workflow | Chạy gì | Kết quả đăng ở pre-release |
+|---|---|---|
+| `smoketest.yml` | Game qua Gradle (`runClient`), chỉ có mod; kèm file jar vừa build | `ci-smoke` |
+| `smoketest-iris.yml` | Game "thật" cài như launcher (Fabric Loader + jar trong `mods/`): (a) Sodium; (b) Sodium + Iris + shader pack nhỏ trong `ci/shaderpack` | `ci-iris` |
+| `smoketest-realpack.yml` | Như (b) nhưng với một shader pack thật tải từ Modrinth (chỉ để tham khảo, không chặn gì) | `ci-realpack` |
+
+Iris không nạp được trong môi trường dev của Gradle (mixin của chính Iris không remap được), nên hai workflow sau chạy bản jar đã build,
+đúng như người chơi dùng.
+
+Lỗi nhìn thấy được (như tay bị mất, khung block lệch, khung hình vỡ khi đổi qua lại) là loại lỗi mà test này bắt được; lỗi chỉ xảy ra trên GPU/lớp dịch GL
 của thiết bị di động thì không.
 
 ## Build
