@@ -21,7 +21,9 @@ còn lỗi riêng của thiết bị. Nếu bị lỗi, gửi file `logs/latest.
 ## Cài đặt
 
 1. Cài Fabric Loader cho 1.21.1 và [Fabric API](https://modrinth.com/mod/fabric-api).
-2. Tải file `.jar` ở mục **Releases** và bỏ vào thư mục `mods`.
+2. Tải file `pocketfsr-0.1.0.jar` rồi bỏ vào thư mục `mods`:
+   - bản phát hành chính thức ở mục **Releases** (khi có), hoặc
+   - bản build thử mới nhất ở pre-release **ci-smoke** (cùng mục Releases; được thay mới sau mỗi lần push vào `main`).
 
 ## Cách dùng
 
@@ -66,7 +68,7 @@ nên chạy được trên các lớp dịch GL của launcher di động).
 
 `.github/workflows/smoketest.yml` chạy game thật dưới Xvfb + Mesa (OpenGL phần mềm), tạo thế giới phẳng có sẵn một cảnh thử
 (khối đá đang nhắm vào, nước, kính màu, rương, mob, bầu trời và mây), rồi chụp ảnh ở các chế độ: gốc, FSR 67%, FSR 50%,
-Bilinear 50% và nhìn lên trời. Kết quả (ảnh + log) được đăng ở pre-release `ci-smoke`. Test sẽ lỗi nếu mixin không áp dụng được,
+Bilinear 50% và nhìn lên trời. Kết quả (ảnh + log, kèm file jar vừa build) được đăng ở pre-release `ci-smoke`. Test sẽ lỗi nếu mixin không áp dụng được,
 shader không biên dịch được hoặc có lỗi GL.
 
 Lỗi nhìn thấy được (như tay bị mất, khung block lệch) là loại lỗi mà test này bắt được; lỗi chỉ xảy ra trên GPU/lớp dịch GL
