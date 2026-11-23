@@ -60,6 +60,13 @@ public class PocketFsrScreen extends Screen {
 
         this.addRenderableWidget(this.sharpnessSlider);
 
+        if (UpscaleManager.irisPresent()) {
+            this.addRenderableWidget(Button.builder(irisLabel(cfg), button -> {
+                cfg.allowWithIris = !cfg.allowWithIris;
+                button.setMessage(irisLabel(cfg));
+            }).bounds(x, y + 96, w, 20).build());
+        }
+
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, button -> this.onClose())
                 .bounds(x, this.height - 28, w, 20).build());
     }
@@ -70,7 +77,7 @@ public class PocketFsrScreen extends Screen {
         graphics.drawCenteredString(this.font, this.title, this.width / 2, 14, 0xFFFFFF);
 
         PocketFsrConfig cfg = PocketFsrConfig.get();
-        int infoY = 34 + 72 + 28;
+        int infoY = 34 + 72 + 28 + (UpscaleManager.irisPresent() ? 24 : 0);
         String blocked = UpscaleManager.blockedKey();
         if (blocked != null) {
             graphics.drawCenteredString(this.font, Component.translatable(blocked), this.width / 2, infoY, 0xFF5555);
@@ -95,6 +102,11 @@ public class PocketFsrScreen extends Screen {
     private static Component enabledLabel(PocketFsrConfig cfg) {
         return Component.translatable("pocketfsr.option.enabled",
                 Component.translatable(cfg.enabled ? "pocketfsr.option.on" : "pocketfsr.option.off"));
+    }
+
+    private static Component irisLabel(PocketFsrConfig cfg) {
+        return Component.translatable("pocketfsr.option.iris",
+                Component.translatable(cfg.allowWithIris ? "pocketfsr.option.on" : "pocketfsr.option.off"));
     }
 
     private static Component modeLabel(PocketFsrConfig cfg) {

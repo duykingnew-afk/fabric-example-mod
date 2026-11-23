@@ -15,13 +15,14 @@
 	"pocketfsr.mode.bilinear": "Bilinear (nhanh nhất)",
 	"pocketfsr.option.sharpness": "Độ sắc nét: %s%%",
 	"pocketfsr.option.sharpness.off": "Độ sắc nét: Tắt",
+	"pocketfsr.option.iris": "Chạy cùng shader (Iris): %s",
 	"pocketfsr.option.resolution": "Thế giới 3D %sx%s, hiển thị %sx%s",
 
 	"pocketfsr.message.on": "Pocket FSR: BẬT",
 	"pocketfsr.message.off": "Pocket FSR: TẮT",
 
 	"pocketfsr.status.failed": "Đã tự tắt sau khi gặp lỗi. Xem log rồi khởi động lại game.",
-	"pocketfsr.status.iris": "Không tương thích với shader pack của Iris.",
+	"pocketfsr.status.iris": "Đang tắt vì tùy chọn \"Chạy cùng shader (Iris)\" đang TẮT.",
 	"pocketfsr.status.shaders": "Không tải được shader FSR.",
 	"pocketfsr.status.fabulous": "Không dùng được với đồ họa Fabulous. Hãy chọn Fast hoặc Fancy."
 }

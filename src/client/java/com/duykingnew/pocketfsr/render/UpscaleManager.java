@@ -192,7 +192,7 @@ public final class UpscaleManager {
 
     private static RenderTarget ensureLowTarget(int w, int h) {
         if (lowTarget == null) {
-            lowTarget = new TextureTarget(w, h, true, Minecraft.ON_OSX);
+            lowTarget = new WorldTarget(w, h, true, Minecraft.ON_OSX);
             lowTarget.setClearColor(0.0F, 0.0F, 0.0F, 0.0F);
             lowFilter = -1;
         } else if (lowTarget.width != w || lowTarget.height != h) {

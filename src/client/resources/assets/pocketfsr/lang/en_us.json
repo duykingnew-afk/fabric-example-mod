@@ -15,13 +15,14 @@
 	"pocketfsr.mode.bilinear": "Bilinear (fastest)",
 	"pocketfsr.option.sharpness": "Sharpening: %s%%",
 	"pocketfsr.option.sharpness.off": "Sharpening: Off",
+	"pocketfsr.option.iris": "Work with Iris shaders: %s",
 	"pocketfsr.option.resolution": "3D world %sx%s, shown at %sx%s",
 
 	"pocketfsr.message.on": "Pocket FSR: ON",
 	"pocketfsr.message.off": "Pocket FSR: OFF",
 
 	"pocketfsr.status.failed": "Turned itself off after an error. See the log, then restart.",
-	"pocketfsr.status.iris": "Not compatible with Iris shader packs.",
+	"pocketfsr.status.iris": "Off, because \"Work with Iris shaders\" is OFF.",
 	"pocketfsr.status.shaders": "The FSR shaders could not be loaded.",
 	"pocketfsr.status.fabulous": "Not available with Fabulous graphics. Use Fast or Fancy."
 }

@@ -43,7 +43,7 @@ jobs:
       - name: install Minecraft 1.21.1 and Fabric Loader
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install minecraft-launcher-lib
+          .venv/bin/pip install minecraft-launcher-lib pillow
           .venv/bin/pip show minecraft-launcher-lib | head -3
           .venv/bin/python ci/run_prod.py install
           echo "java for the game: $JAVA_HOME_21_X64"
@@ -63,6 +63,21 @@ jobs:
           .venv/bin/python ci/run_prod.py run --game-dir prod/iris --mod-jar "$JAR" \
             --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium iris \
             --shaderpack ci/shaderpack --prefix iris-
+      - name: compare the screenshots (switching on and off must not change the picture)
+        id: compare
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          status=0
+          : > out/compare.txt
+          for scenario in sodium iris; do
+            echo "== $scenario" >> out/compare.txt
+            .venv/bin/python ci/compare_shots.py "prod/$scenario/smoketest" "$scenario-" >> out/compare.txt || status=1
+            echo >> out/compare.txt
+          done
+          cat out/compare.txt
+          exit $status
       - name: show the interesting log lines
         if: always()
         run: |
@@ -110,4 +125,5 @@ jobs:
         run: |
           echo "with Sodium: ${{ steps.sodium.outcome }}"
           echo "with Sodium + Iris + shader pack: ${{ steps.iris.outcome }}"
-          [ "${{ steps.sodium.outcome }}" = "success" ] && [ "${{ steps.iris.outcome }}" = "success" ]
+          echo "screenshots comparison: ${{ steps.compare.outcome }}"
+          [ "${{ steps.sodium.outcome }}" = "success" ] && [ "${{ steps.iris.outcome }}" = "success" ] && [ "${{ steps.compare.outcome }}" = "success" ]

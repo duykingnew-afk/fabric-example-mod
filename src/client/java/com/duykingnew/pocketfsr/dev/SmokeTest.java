@@ -59,6 +59,12 @@ public final class SmokeTest {
             new Shot("bilinear50", true, 0.5F, PocketFsrConfig.Mode.BILINEAR, AHEAD),
             new Shot("native-sky", false, 1.0F, PocketFsrConfig.Mode.FSR1, SKY),
             new Shot("fsr67-sky", true, 0.67F, PocketFsrConfig.Mode.FSR1, SKY),
+            // switch on and off and between sizes a few more times: the pictures must match the first ones
+            new Shot("native-again", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("fsr67-again", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("native-last", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("fsr50-last", true, 0.5F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            new Shot("fsr67-last", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
     };
 
     /** Commands run as the player; every position is relative to where the player stands, facing +Z. */
