@@ -1,0 +1,92 @@
+# The same render test as smoketest.yml, but with Sodium and Iris installed and a tiny test shader pack
+# (ci/shaderpack) selected, to check that Pocket FSR works together with shader packs.
+# Screenshots and logs go to a rolling pre-release called "ci-iris".
+
+name: smoketest-iris
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smoketest-iris
+  cancel-in-progress: false
+
+jobs:
+  smoke-iris:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+      - name: install virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libopenal1
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: find the newest Sodium and Iris for Minecraft 1.21.1
+        run: |
+          pick() {
+            curl -fsSL "https://api.modrinth.com/v2/project/$1/version?loaders=%5B%22fabric%22%5D&game_versions=%5B%221.21.1%22%5D" \
+              | jq -r '([.[] | select(.version_type == "release")] + .)[0].version_number'
+          }
+          echo "SODIUM_VERSION=$(pick sodium)" >> "$GITHUB_ENV"
+          echo "IRIS_VERSION=$(pick iris)" >> "$GITHUB_ENV"
+      - name: prepare run directory (options, Iris config, test shader pack)
+        run: |
+          echo "sodium=$SODIUM_VERSION iris=$IRIS_VERSION"
+          mkdir -p run/config run/shaderpacks
+          cp -r ci/shaderpack run/shaderpacks/pocketfsr-test
+          printf 'enableShaders=true\nshaderPack=pocketfsr-test\n' > run/config/iris.properties
+          printf 'onboardAccessibility:false\ngraphicsMode:1\nrenderDistance:8\nguiScale:0\npauseOnLostFocus:false\ntutorialStep:none\nmaxFps:260\nenableVsync:false\nlang:en_us\n' > run/options.txt
+          printf 'eula=true\n' > run/eula.txt
+      - name: run the client with Sodium and Iris
+        env:
+          POCKETFSR_SMOKETEST: '1'
+          POCKETFSR_SMOKETEST_PREFIX: 'iris-'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          MESA_GL_VERSION_OVERRIDE: '4.5'
+          MESA_GLSL_VERSION_OVERRIDE: '450'
+        run: |
+          set -o pipefail
+          xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew runClient -PsodiumVersion="$SODIUM_VERSION" -PirisVersion="$IRIS_VERSION" --args="--width 1280 --height 720" 2>&1 | tee run/gradle-run.log
+      - name: show the interesting log lines
+        if: always()
+        run: |
+          grep -n "PocketFSR\|Iris\|Sodium\|mixin\|Exception\|ERROR" run/logs/latest.log | cut -c1-300 | head -250 || true
+          ls -la run/smoketest run/crash-reports 2>/dev/null || true
+      - name: publish screenshots and logs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p run/smoketest
+          cp run/logs/latest.log run/smoketest/iris-game-latest.log 2>/dev/null || true
+          cp run/gradle-run.log run/smoketest/iris-gradle-run.log 2>/dev/null || true
+          for crash in run/crash-reports/*.txt; do
+            [ -e "$crash" ] || continue
+            cp "$crash" "run/smoketest/iris-$(basename "$crash")"
+          done
+          ls -la run/smoketest
+          NOTES="Screenshots and logs of the automatic render test with Sodium ${SODIUM_VERSION} and Iris ${IRIS_VERSION} and a small test shader pack, commit ${GITHUB_SHA}. Not a mod release."
+          for attempt in 1 2 3; do
+            gh release delete ci-iris --cleanup-tag -y || true
+            if gh release create ci-iris run/smoketest/* \
+                --prerelease --target "${GITHUB_SHA}" \
+                --title "Iris test (${GITHUB_SHA::7})" \
+                --notes "$NOTES"; then
+              break
+            fi
+            echo "creating the release failed (attempt ${attempt}), trying again"
+            sleep 15
+          done
+          gh release view ci-iris > /dev/null

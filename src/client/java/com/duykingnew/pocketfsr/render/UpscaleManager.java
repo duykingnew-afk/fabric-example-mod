@@ -84,7 +84,7 @@ public final class UpscaleManager {
         if (failed) {
             return "pocketfsr.status.failed";
         }
-        if (IRIS_PRESENT) {
+        if (IRIS_PRESENT && !PocketFsrConfig.get().allowWithIris) {
             return "pocketfsr.status.iris";
         }
         if (!FsrShaders.ready()) {
@@ -95,6 +95,11 @@ public final class UpscaleManager {
             return "pocketfsr.status.fabulous";
         }
         return null;
+    }
+
+    /** True when the Iris shader mod is loaded. */
+    public static boolean irisPresent() {
+        return IRIS_PRESENT;
     }
 
     public static long worldFrames() {

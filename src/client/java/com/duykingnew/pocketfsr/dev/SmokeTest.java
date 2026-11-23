@@ -84,6 +84,8 @@ public final class SmokeTest {
     private static int shotIndex;
     private static long frameMark;
     private static final long START_NANOS = System.nanoTime();
+    /** Lets a second run (for example with Iris) keep its screenshots apart: {@code POCKETFSR_SMOKETEST_PREFIX=iris-}. */
+    private static final String PREFIX = System.getenv().getOrDefault("POCKETFSR_SMOKETEST_PREFIX", "");
 
     private SmokeTest() {
     }
@@ -101,7 +103,7 @@ public final class SmokeTest {
 
     private static void onTick(Minecraft mc) {
         stageTicks++;
-        if ((System.nanoTime() - START_NANOS) / 1_000_000_000L > 14 * 60) {
+        if ((System.nanoTime() - START_NANOS) / 1_000_000_000L > 20 * 60) {
             LOGGER.error("smoke test timed out in stage {}", stage);
             System.exit(3);
         }
@@ -170,13 +172,25 @@ public final class SmokeTest {
 
     private static void saveShot(Minecraft mc, Shot shot) throws Exception {
         int glError = GL11.glGetError();
-        LOGGER.info("{}: frames={}, GL error=0x{}, blocked={}", shot.name(), UpscaleManager.worldFrames(),
-                Integer.toHexString(glError), UpscaleManager.blockedKey());
+        LOGGER.info("{}{}: frames={}, GL error=0x{}, blocked={}, active={}, shader pack in use: {}", PREFIX, shot.name(),
+                UpscaleManager.worldFrames(), Integer.toHexString(glError), UpscaleManager.blockedKey(),
+                shot.enabled(), shaderPackState());
         Path dir = mc.gameDirectory.toPath().resolve("smoketest");
         Files.createDirectories(dir);
         try (NativeImage image = Screenshot.takeScreenshot(mc.getMainRenderTarget())) {
-            image.writeToFile(dir.resolve(shot.name() + ".png"));
-            LOGGER.info("saved {}.png ({}x{})", shot.name(), image.getWidth(), image.getHeight());
+            image.writeToFile(dir.resolve(PREFIX + shot.name() + ".png"));
+            LOGGER.info("saved {}{}.png ({}x{})", PREFIX, shot.name(), image.getWidth(), image.getHeight());
+        }
+    }
+
+    /** Asks Iris (if it is installed) whether a shader pack is being used, so the log shows what was really tested. */
+    private static String shaderPackState() {
+        try {
+            Class<?> api = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+            Object instance = api.getMethod("getInstance").invoke(null);
+            return String.valueOf(api.getMethod("isShaderPackInUse").invoke(instance));
+        } catch (ReflectiveOperationException | LinkageError e) {
+            return "no Iris";
         }
     }
 

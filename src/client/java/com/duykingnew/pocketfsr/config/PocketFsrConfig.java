@@ -53,6 +53,8 @@ public final class PocketFsrConfig {
     public Mode mode = Mode.FSR1;
     /** RCAS sharpening, 0 = off, 1 = strongest. Only used by {@link Mode#FSR1}. */
     public float sharpness = 0.8f;
+    /** Keep upscaling when the Iris shader mod is installed. Set to false if a shader pack looks wrong. */
+    public boolean allowWithIris = true;
 
     public static PocketFsrConfig get() {
         return instance;
