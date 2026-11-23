@@ -1,0 +1,52 @@
+# Helper for development only: downloads the newest Iris and Sodium for 1.21.1 and publishes a dump of
+# their class list and bytecode around render targets (release "ci-inspect"), so the compatibility code can
+# be written against what these mods really do. Runs when one of its own files changes.
+
+name: inspect-iris
+on:
+  push:
+    branches: [main]
+    paths:
+      - ci/inspect_iris.sh
+      - ci/run_prod.py
+      - .github/workflows/inspect-iris.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: inspect-iris
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'microsoft'
+      - name: download Iris and Sodium
+        run: python3 ci/run_prod.py fetch --out inspect/jars --mods iris sodium
+      - name: dump their classes
+        run: bash ci/inspect_iris.sh
+      - name: publish the dump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3; do
+            gh release delete ci-inspect --cleanup-tag -y || true
+            if gh release create ci-inspect inspect/iris-dump.tar.gz \
+                --prerelease --target "${GITHUB_SHA}" \
+                --title "Iris class dump (${GITHUB_SHA::7})" \
+                --notes "Class list and bytecode of Iris and Sodium around render targets, for development of Pocket FSR. Not a mod release."; then
+              break
+            fi
+            echo "creating the release failed (attempt ${attempt}), trying again"
+            sleep 15
+          done
+          gh release view ci-inspect > /dev/null

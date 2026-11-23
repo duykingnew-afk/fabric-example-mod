@@ -161,10 +161,23 @@ def run(args):
     sys.exit(0 if code == 0 else 1)
 
 
+def fetch(args):
+    """Only download mod jars (used by the inspection job, which does not start the game)."""
+    os.makedirs(args.out, exist_ok=True)
+    for spec in args.mods:
+        slug, version, url, filename = modrinth_pick(spec)
+        with open(os.path.join(args.out, filename), "wb") as out:
+            out.write(http(url))
+        print(f"fetched {slug} {version} -> {filename}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("install")
+    fetch_parser = sub.add_parser("fetch")
+    fetch_parser.add_argument("--out", required=True)
+    fetch_parser.add_argument("--mods", nargs="+", required=True)
     run_parser = sub.add_parser("run")
     run_parser.add_argument("--game-dir", required=True)
     run_parser.add_argument("--mod-jar", required=True)
@@ -176,6 +189,8 @@ def main():
     args = parser.parse_args()
     if args.command == "install":
         install()
+    elif args.command == "fetch":
+        fetch(args)
     else:
         run(args)
 
