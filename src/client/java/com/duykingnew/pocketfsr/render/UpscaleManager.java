@@ -23,6 +23,7 @@ import com.duykingnew.pocketfsr.config.PocketFsrConfig;
 import com.duykingnew.pocketfsr.mixin.MinecraftAccessor;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -35,8 +36,12 @@ import net.minecraft.client.GraphicsStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ShaderInstance;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL13;
+import org.lwjgl.opengl.GL33;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.function.Consumer;
 
 /**
  * Renders the 3D world at a reduced resolution and upscales it to the window.
@@ -72,6 +77,13 @@ public final class UpscaleManager {
     private static int lowFilter = -1;
     /** Number of 3D world frames started so far (used by the CI smoke test to wait for fresh frames). */
     private static long worldFrames;
+    /** Test hook: re-apply the GL state before every pass (see {@link #freshState()}). Set by the CI smoke test. */
+    public static volatile boolean debugFreshState;
+    /** Test hook: texture filter of the low resolution picture ({@code GL_NEAREST}/{@code GL_LINEAR}), -1 = by mode. */
+    public static volatile int debugLowFilter = -1;
+    /** Test hooks: get the low resolution picture, and the EASU result, of each upscaled frame (CI smoke test). */
+    private static volatile Consumer<RenderTarget> debugLowHook;
+    private static volatile Consumer<RenderTarget> debugMidHook;
 
     private UpscaleManager() {
     }
@@ -104,6 +116,12 @@ public final class UpscaleManager {
 
     public static long worldFrames() {
         return worldFrames;
+    }
+
+    /** Test hook, see {@link #debugLowHook}; pass {@code null} twice to stop. */
+    public static void debugCapture(Consumer<RenderTarget> low, Consumer<RenderTarget> mid) {
+        debugLowHook = low;
+        debugMidHook = mid;
     }
 
     public static boolean isActive() {
@@ -232,24 +250,36 @@ public final class UpscaleManager {
         RenderSystem.disableCull();
         RenderSystem.colorMask(true, true, true, false);
 
+        Consumer<RenderTarget> lowHook = debugLowHook;
+        if (lowHook != null) {
+            lowHook.accept(low);
+        }
+        int filterOverride = debugLowFilter;
         if (cfg.mode == PocketFsrConfig.Mode.FSR1) {
-            setLowFilter(low, GL11.GL_NEAREST);
+            setLowFilter(low, filterOverride >= 0 ? filterOverride : GL11.GL_NEAREST);
             if (cfg.sharpness > 0.01F) {
                 RenderTarget mid = ensureMidTarget(sw, sh);
                 mid.bindWrite(true);
                 drawEasu(low, sw, sh);
+                Consumer<RenderTarget> midHook = debugMidHook;
+                if (midHook != null) {
+                    midHook.accept(mid);
+                }
                 screen.bindWrite(true);
                 drawRcas(mid, cfg.sharpness);
             } else {
                 drawEasu(low, sw, sh);
             }
         } else {
-            setLowFilter(low, GL11.GL_LINEAR);
+            setLowFilter(low, filterOverride >= 0 ? filterOverride : GL11.GL_LINEAR);
             drawBlit(low, sw, sh);
         }
     }
 
     private static void drawEasu(RenderTarget low, int sw, int sh) {
+        if (debugFreshState) {
+            freshState();
+        }
         ShaderInstance shader = FsrShaders.easu();
         shader.setSampler("InSampler", low.getColorTextureId());
         set2(shader, "InSize", low.width, low.height);
@@ -260,6 +290,9 @@ public final class UpscaleManager {
     private static void drawRcas(RenderTarget source, float sharpness) {
         // RCAS works in "stops" of attenuation: 0 = sharpest, 2 = off. Our 0..1 slider maps onto 2..0.
         float stops = (1.0F - sharpness) * 2.0F;
+        if (debugFreshState) {
+            freshState();
+        }
         ShaderInstance shader = FsrShaders.rcas();
         shader.setSampler("InSampler", source.getColorTextureId());
         Uniform sharp = shader.getUniform("Sharpness");
@@ -270,6 +303,9 @@ public final class UpscaleManager {
     }
 
     private static void drawBlit(RenderTarget low, int sw, int sh) {
+        if (debugFreshState) {
+            freshState();
+        }
         ShaderInstance shader = FsrShaders.blit();
         shader.setSampler("InSampler", low.getColorTextureId());
         set2(shader, "OutSize", sw, sh);
@@ -292,6 +328,28 @@ public final class UpscaleManager {
         builder.addVertex(1.0F, 1.0F, 0.0F);
         builder.addVertex(-1.0F, 1.0F, 0.0F);
         BufferUploader.drawWithShader(builder.buildOrThrow());
+    }
+
+    /**
+     * Makes the real GL state match what the next pass needs, whatever the cached state of {@code GlStateManager}
+     * believes: mods that call GL directly (shader loaders) can leave the two different, and then a plain
+     * {@code bindTexture} or {@code disableBlend} is skipped as "already done". Every toggle below goes through
+     * {@code GlStateManager}, so its cache stays right too.
+     */
+    private static void freshState() {
+        RenderSystem.activeTexture(GL13.GL_TEXTURE0);
+        RenderSystem.bindTexture(0);
+        GL33.glBindSampler(0, 0);
+        RenderSystem.enableBlend();
+        RenderSystem.disableBlend();
+        RenderSystem.enableDepthTest();
+        RenderSystem.disableDepthTest();
+        RenderSystem.enableCull();
+        RenderSystem.disableCull();
+        GlStateManager._enableScissorTest();
+        GlStateManager._disableScissorTest();
+        RenderSystem.colorMask(false, false, false, false);
+        RenderSystem.colorMask(true, true, true, false);
     }
 
     /** Puts the GL state back to what the game expects while it moves on to draw the GUI. */

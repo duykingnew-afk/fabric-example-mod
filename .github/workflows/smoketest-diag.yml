@@ -1,0 +1,122 @@
+# Diagnostic run: why is the FSR picture darker than the native one with some real shader packs?
+# It takes the shots of SmokeTest.DIAG_SHOTS (the plain stretch, EASU alone, EASU + RCAS, with the other texture
+# filter, with the GL state set again before every pass), saves the low resolution picture and the EASU result of
+# each frame, logs the real GL state, and prints how bright each picture is (ci/diag_report.py).
+# Once with a real shader pack from Modrinth and once, as a control, with the tiny test pack.
+# Pictures and logs go to a rolling pre-release called "ci-diag". Informational: it does not block anything.
+
+name: smoketest-diag
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smoketest-diag
+  cancel-in-progress: false
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk (25 builds the mod, 21 runs the game like a phone launcher does)
+        uses: actions/setup-java@v5
+        with:
+          java-version: |
+            21
+            25
+          distribution: 'microsoft'
+      - name: install virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libopenal1
+      - name: build the mod jar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build
+      - name: install Minecraft 1.21.1 and Fabric Loader
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install minecraft-launcher-lib pillow
+          .venv/bin/python ci/run_prod.py install
+      - name: diagnostic shots with the real shader pack
+        id: real
+        continue-on-error: true
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -e '-sources' -e '-dev' | head -n 1)
+          .venv/bin/python ci/run_prod.py run --diag --game-dir prod/realdiag --mod-jar "$JAR" \
+            --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium iris \
+            --shaderpack-modrinth makeup-ultra-fast --prefix realdiag- --timeout 1500
+      - name: diagnostic shots with the tiny test pack (control)
+        id: tiny
+        continue-on-error: true
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -e '-sources' -e '-dev' | head -n 1)
+          .venv/bin/python ci/run_prod.py run --diag --game-dir prod/tinydiag --mod-jar "$JAR" \
+            --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium iris \
+            --shaderpack ci/shaderpack --prefix tinydiag- --timeout 1500
+      - name: brightness report
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          : > out/report.txt
+          for scenario in realdiag tinydiag; do
+            echo "=================== $scenario" >> out/report.txt
+            .venv/bin/python ci/diag_report.py "prod/$scenario/smoketest" "$scenario-" >> out/report.txt || true
+            echo >> out/report.txt
+          done
+          cat out/report.txt
+      - name: show the interesting log lines
+        if: always()
+        run: |
+          for dir in prod/realdiag prod/tinydiag; do
+            echo "=================== $dir"
+            cat "$dir/mods-used.txt" 2>/dev/null || true
+            LOG="$dir/logs/latest.log"
+            [ -e "$LOG" ] || LOG="$dir/launcher-output.log"
+            grep -n "PocketFSR\|Exception\|ERROR\|FATAL\|OpenGL debug" "$LOG" | cut -c1-400 | head -150 || true
+            ls -la "$dir/smoketest" "$dir/crash-reports" 2>/dev/null || true
+          done
+      - name: publish pictures and logs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          for dir in prod/realdiag prod/tinydiag; do
+            prefix=$(basename "$dir")-
+            cp "$dir"/smoketest/*.png out/ 2>/dev/null || true
+            cp "$dir/logs/latest.log" "out/${prefix}game-latest.log" 2>/dev/null || true
+            cp "$dir/launcher-output.log" "out/${prefix}launcher-output.log" 2>/dev/null || true
+            cp "$dir/mods-used.txt" "out/${prefix}mods-used.txt" 2>/dev/null || true
+            for crash in "$dir"/crash-reports/*.txt; do
+              [ -e "$crash" ] || continue
+              cp "$crash" "out/${prefix}$(basename "$crash")"
+            done
+          done
+          ls -la out
+          NOTES="Diagnostic pictures, brightness report (report.txt) and logs of the automatic render test with Sodium + Iris, with a real shader pack and with the tiny test pack, commit ${GITHUB_SHA}. Not a mod release. Used: $(tr '\n' ';' < prod/realdiag/mods-used.txt 2>/dev/null)"
+          for attempt in 1 2 3; do
+            gh release delete ci-diag --cleanup-tag -y || true
+            if gh release create ci-diag out/* \
+                --prerelease --target "${GITHUB_SHA}" \
+                --title "Diagnostic run (${GITHUB_SHA::7})" \
+                --notes "$NOTES"; then
+              break
+            fi
+            echo "creating the release failed (attempt ${attempt}), trying again"
+            sleep 15
+          done
+          gh release view ci-diag > /dev/null
+      - name: report
+        if: always()
+        run: |
+          echo "diagnostic run with the real shader pack: ${{ steps.real.outcome }}"
+          echo "diagnostic run with the tiny pack: ${{ steps.tiny.outcome }}"

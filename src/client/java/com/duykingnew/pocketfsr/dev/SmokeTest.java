@@ -18,6 +18,7 @@ package com.duykingnew.pocketfsr.dev;
 import com.duykingnew.pocketfsr.config.PocketFsrConfig;
 import com.duykingnew.pocketfsr.render.FsrShaders;
 import com.duykingnew.pocketfsr.render.UpscaleManager;
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
@@ -32,9 +33,12 @@ import net.minecraft.world.level.WorldDataConfiguration;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
+import org.lwjgl.system.MemoryStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -47,12 +51,43 @@ import java.nio.file.Path;
 public final class SmokeTest {
     private static final Logger LOGGER = LoggerFactory.getLogger("PocketFSR-SMOKE");
 
-    private record Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch) {
+    /**
+     * One screenshot. The last four values only matter for the diagnostic shots: {@code freshState} sets
+     * {@link UpscaleManager#debugFreshState}, {@code lowFilter} {@link UpscaleManager#debugLowFilter}, and
+     * {@code dump} also saves the low resolution picture (and the EASU result) of the frame and logs the GL state,
+     * to see where a difference between two modes comes from.
+     */
+    private record Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch,
+                        float sharpness, boolean freshState, boolean dump, int lowFilter) {
+        Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch) {
+            this(name, enabled, scale, mode, pitch, 0.8F, false, false, -1);
+        }
+    }
+
+    /** A diagnostic shot at 50%, looking ahead. */
+    private static Shot diag(String name, PocketFsrConfig.Mode mode, float sharpness, boolean freshState, int lowFilter) {
+        return new Shot(name, true, 0.5F, mode, 0.0F, sharpness, freshState, true, lowFilter);
     }
 
     private static final float AHEAD = 0.0F;
     private static final float SKY = -55.0F;
-    private static final Shot[] SHOTS = {
+    /** Set {@code POCKETFSR_SMOKETEST_DIAG} to take these instead: where does a difference between modes come from? */
+    private static final boolean DIAG = System.getenv("POCKETFSR_SMOKETEST_DIAG") != null;
+    private static final Shot[] DIAG_SHOTS = {
+            new Shot("d-native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            // the plain stretch (the one that looks right with every pack), with its normal and with the other filter
+            diag("d-bilinear", PocketFsrConfig.Mode.BILINEAR, 0.8F, false, -1),
+            diag("d-bilinear-nearest", PocketFsrConfig.Mode.BILINEAR, 0.8F, false, GL11.GL_NEAREST),
+            // EASU alone onto the screen; EASU into the scratch target and RCAS onto the screen; with the other filter
+            diag("d-easu", PocketFsrConfig.Mode.FSR1, 0.0F, false, -1),
+            diag("d-fsr", PocketFsrConfig.Mode.FSR1, 0.8F, false, -1),
+            diag("d-fsr-linear", PocketFsrConfig.Mode.FSR1, 0.8F, false, GL11.GL_LINEAR),
+            // the same with the GL state set again before every pass
+            diag("d-easu-fresh", PocketFsrConfig.Mode.FSR1, 0.0F, true, -1),
+            diag("d-fsr-fresh", PocketFsrConfig.Mode.FSR1, 0.8F, true, -1),
+            new Shot("d-native-2", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+    };
+    private static final Shot[] SHOTS = DIAG ? DIAG_SHOTS : new Shot[] {
             new Shot("native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr67", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr50", true, 0.5F, PocketFsrConfig.Mode.FSR1, AHEAD),
@@ -89,6 +124,8 @@ public final class SmokeTest {
     private static int stageTicks;
     private static int shotIndex;
     private static long frameMark;
+    /** Upscaled frames seen in the current diagnostic shot (the GL state is logged once, in the middle). */
+    private static int diagFrames;
     private static final long START_NANOS = System.nanoTime();
     /** Lets a second run (for example with Iris) keep its screenshots apart: {@code POCKETFSR_SMOKETEST_PREFIX=iris-}. */
     private static final String PREFIX = System.getenv().getOrDefault("POCKETFSR_SMOKETEST_PREFIX", "");
@@ -170,13 +207,117 @@ public final class SmokeTest {
         cfg.enabled = shot.enabled();
         cfg.scale = shot.scale();
         cfg.mode = shot.mode();
-        cfg.sharpness = 0.8F;
+        cfg.sharpness = shot.sharpness();
+        UpscaleManager.debugFreshState = shot.freshState();
+        UpscaleManager.debugLowFilter = shot.lowFilter();
+        diagFrames = 0;
+        if (shot.dump()) {
+            UpscaleManager.debugCapture(
+                    target -> {
+                        dump(mc, target, "low-" + shot.name());
+                        if (++diagFrames == 5) {
+                            logGlState(shot, target);
+                        }
+                    },
+                    target -> {
+                        dump(mc, target, "mid-" + shot.name());
+                        if (diagFrames == 5) {
+                            LOGGER.info("{}{} the scratch target: {}", PREFIX, shot.name(), textureInfo(target.getColorTextureId()));
+                        }
+                    });
+        }
         mc.player.setXRot(shot.pitch());
         mc.player.xRotO = shot.pitch();
         frameMark = UpscaleManager.worldFrames();
     }
 
+    /** Saves one render target as a PNG (used by the diagnostic shots). */
+    private static void dump(Minecraft mc, RenderTarget target, String name) {
+        try {
+            Path dir = mc.gameDirectory.toPath().resolve("smoketest");
+            Files.createDirectories(dir);
+            try (NativeImage image = Screenshot.takeScreenshot(target)) {
+                image.writeToFile(dir.resolve(PREFIX + name + ".png"));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("could not save {}", name, e);
+        }
+    }
+
+    /**
+     * Logs the real GL state (not what Minecraft's cache believes) just before the upscaling passes draw, and what
+     * the low resolution target really holds: a leftover from a shader pack shows up here.
+     */
+    private static void logGlState(Shot shot, RenderTarget low) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            ByteBuffer mask = stack.malloc(4);
+            GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, mask);
+            int[] viewport = new int[4];
+            GL11.glGetIntegerv(GL11.GL_VIEWPORT, viewport);
+            StringBuilder out = new StringBuilder();
+            out.append("blend=").append(GL11.glIsEnabled(GL11.GL_BLEND));
+            out.append(" blendFunc=").append(GL11.glGetInteger(0x80C9)).append('/').append(GL11.glGetInteger(0x80C8))
+                    .append('/').append(GL11.glGetInteger(0x80CB)).append('/').append(GL11.glGetInteger(0x80CA));
+            out.append(" depthTest=").append(GL11.glIsEnabled(GL11.GL_DEPTH_TEST));
+            out.append(" cull=").append(GL11.glIsEnabled(GL11.GL_CULL_FACE));
+            out.append(" scissor=").append(GL11.glIsEnabled(GL11.GL_SCISSOR_TEST));
+            out.append(" stencil=").append(GL11.glIsEnabled(GL11.GL_STENCIL_TEST));
+            out.append(" framebufferSrgb=").append(GL11.glIsEnabled(0x8DB9));
+            out.append(" dither=").append(GL11.glIsEnabled(GL11.GL_DITHER));
+            out.append(" multisample=").append(GL11.glIsEnabled(0x809D));
+            out.append(" colorMask=").append(mask.get(0)).append(mask.get(1)).append(mask.get(2)).append(mask.get(3));
+            out.append(" viewport=").append(viewport[0]).append(',').append(viewport[1]).append(',')
+                    .append(viewport[2]).append(',').append(viewport[3]);
+            out.append(" activeTexture=").append(GL11.glGetInteger(0x84E0) - 0x84C0);
+            out.append(" boundTexture0=").append(GL11.glGetInteger(0x8069));
+            out.append(" boundSampler0=").append(GL11.glGetInteger(0x8919));
+            out.append(" program=").append(GL11.glGetInteger(0x8B8D));
+            int drawFbo = GL11.glGetInteger(0x8CA6);
+            out.append(" drawFramebuffer=").append(drawFbo);
+            out.append(" drawColorEncoding=0x").append(Integer.toHexString(
+                    GL30.glGetFramebufferAttachmentParameteri(GL30.GL_DRAW_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, 0x8210)));
+            LOGGER.info("{}{} GL state before the passes: {}", PREFIX, shot.name(), out);
+
+            // what is really attached to the low resolution target, against the texture the passes read from
+            int readFbo = GL11.glGetInteger(0x8CAA);
+            GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, low.frameBufferId);
+            int attachedColor = GL30.glGetFramebufferAttachmentParameteri(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, 0x8CD1);
+            int attachedDepth = GL30.glGetFramebufferAttachmentParameteri(GL30.GL_READ_FRAMEBUFFER, GL30.GL_DEPTH_ATTACHMENT, 0x8CD1);
+            GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
+            LOGGER.info("{}{} the low target: size {}x{}, framebuffer {}, color attachment {} (the passes read texture {}), "
+                            + "depth attachment {} (its depth texture {}); texture: {}", PREFIX, shot.name(),
+                    low.width, low.height, low.frameBufferId, attachedColor, low.getColorTextureId(),
+                    attachedDepth, low.getDepthTextureId(), textureInfo(low.getColorTextureId()));
+        } catch (Throwable t) {
+            LOGGER.warn("could not read the GL state", t);
+        }
+    }
+
+    /** Filter, wrap, mip range, swizzle and format of a 2D texture, read without disturbing what is bound. */
+    private static String textureInfo(int texture) {
+        int previous = GL11.glGetInteger(0x8069);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
+        try {
+            return "id " + texture + " min/mag filter " + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x2801))
+                    + "/" + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x2800))
+                    + " wrap " + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x2802))
+                    + "/" + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x2803))
+                    + " levels " + GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x813C)
+                    + ".." + GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x813D)
+                    + " swizzle " + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x8E42))
+                    + "/" + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x8E43))
+                    + "/" + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x8E44))
+                    + "/" + Integer.toHexString(GL11.glGetTexParameteri(GL11.GL_TEXTURE_2D, 0x8E45))
+                    + " format 0x" + Integer.toHexString(GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, 0x1003))
+                    + " " + GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, 0x1000)
+                    + "x" + GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, 0x1001);
+        } finally {
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
+        }
+    }
+
     private static void saveShot(Minecraft mc, Shot shot) throws Exception {
+        UpscaleManager.debugCapture(null, null);
         int glError = GL11.glGetError();
         LOGGER.info("{}{}: frames={}, GL error=0x{}, blocked={}, active={}, shader pack in use: {}", PREFIX, shot.name(),
                 UpscaleManager.worldFrames(), Integer.toHexString(glError), UpscaleManager.blockedKey(),
