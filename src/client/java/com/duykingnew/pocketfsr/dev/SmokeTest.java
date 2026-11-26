@@ -20,6 +20,7 @@ import com.duykingnew.pocketfsr.render.FsrShaders;
 import com.duykingnew.pocketfsr.render.UpscaleManager;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -35,6 +36,7 @@ import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,8 +73,17 @@ public final class SmokeTest {
 
     private static final float AHEAD = 0.0F;
     private static final float SKY = -55.0F;
-    /** Set {@code POCKETFSR_SMOKETEST_DIAG} to take these instead: where does a difference between modes come from? */
-    private static final boolean DIAG = System.getenv("POCKETFSR_SMOKETEST_DIAG") != null;
+    /**
+     * Which shots to take ({@code POCKETFSR_SMOKETEST_SET}): {@code default}; {@code diag}, where a difference between
+     * two modes comes from; {@code compare}, how the picture falls with the render scale.
+     */
+    private static final String SET = System.getenv().getOrDefault("POCKETFSR_SMOKETEST_SET",
+            System.getenv("POCKETFSR_SMOKETEST_DIAG") != null ? "diag" : "default");
+    /** World frames to wait after each change before the picture is taken (a shader pack needs a while to settle). */
+    private static final int FRAMES = Integer.parseInt(System.getenv().getOrDefault("POCKETFSR_SMOKETEST_FRAMES", "8"));
+    /** {@code POCKETFSR_SMOKETEST_CURVE}: log the brightness and the time of every world frame. */
+    private static final boolean CURVE = System.getenv("POCKETFSR_SMOKETEST_CURVE") != null;
+
     private static final Shot[] DIAG_SHOTS = {
             new Shot("d-native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
             // the plain stretch (the one that looks right with every pack), with its normal and with the other filter
@@ -87,7 +98,23 @@ public final class SmokeTest {
             diag("d-fsr-fresh", PocketFsrConfig.Mode.FSR1, 0.8F, true, -1),
             new Shot("d-native-2", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
     };
-    private static final Shot[] SHOTS = DIAG ? DIAG_SHOTS : new Shot[] {
+    /** The same view at different scales and sharpness: how far from the native picture does each one stay? */
+    private static Shot compare(String name, float scale, PocketFsrConfig.Mode mode, float sharpness) {
+        return new Shot(name, true, scale, mode, AHEAD, sharpness, false, false, -1);
+    }
+
+    private static final Shot[] COMPARE_SHOTS = {
+            new Shot("c-native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+            compare("c-fsr70", 0.70F, PocketFsrConfig.Mode.FSR1, 0.8F),
+            compare("c-fsr50", 0.50F, PocketFsrConfig.Mode.FSR1, 0.8F),
+            compare("c-fsr25", 0.25F, PocketFsrConfig.Mode.FSR1, 0.8F),
+            compare("c-fsr25-sharp", 0.25F, PocketFsrConfig.Mode.FSR1, 1.0F),
+            compare("c-bilinear25", 0.25F, PocketFsrConfig.Mode.BILINEAR, 0.8F),
+            compare("c-bilinear70", 0.70F, PocketFsrConfig.Mode.BILINEAR, 0.8F),
+            new Shot("c-native-2", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
+    };
+
+    private static final Shot[] DEFAULT_SHOTS = {
             new Shot("native", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr67", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr50", true, 0.5F, PocketFsrConfig.Mode.FSR1, AHEAD),
@@ -100,6 +127,12 @@ public final class SmokeTest {
             new Shot("native-last", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr50-last", true, 0.5F, PocketFsrConfig.Mode.FSR1, AHEAD),
             new Shot("fsr67-last", true, 0.67F, PocketFsrConfig.Mode.FSR1, AHEAD),
+    };
+
+    private static final Shot[] SHOTS = switch (SET) {
+        case "diag" -> DIAG_SHOTS;
+        case "compare" -> COMPARE_SHOTS;
+        default -> DEFAULT_SHOTS;
     };
 
     /** Commands run as the player; every position is relative to where the player stands, facing +Z. */
@@ -126,6 +159,8 @@ public final class SmokeTest {
     private static long frameMark;
     /** Upscaled frames seen in the current diagnostic shot (the GL state is logged once, in the middle). */
     private static int diagFrames;
+    private static long lastCurveFrame = -1;
+    private static long shotStartNanos;
     private static final long START_NANOS = System.nanoTime();
     /** Lets a second run (for example with Iris) keep its screenshots apart: {@code POCKETFSR_SMOKETEST_PREFIX=iris-}. */
     private static final String PREFIX = System.getenv().getOrDefault("POCKETFSR_SMOKETEST_PREFIX", "");
@@ -178,7 +213,11 @@ public final class SmokeTest {
                     }
                 }
                 case SHOOT -> {
-                    if (UpscaleManager.worldFrames() < frameMark + 8) {
+                    if (CURVE && UpscaleManager.worldFrames() != lastCurveFrame) {
+                        lastCurveFrame = UpscaleManager.worldFrames();
+                        logCurve(mc, SHOTS[shotIndex]);
+                    }
+                    if (UpscaleManager.worldFrames() < frameMark + FRAMES) {
                         return;
                     }
                     saveShot(mc, SHOTS[shotIndex]);
@@ -229,6 +268,33 @@ public final class SmokeTest {
         mc.player.setXRot(shot.pitch());
         mc.player.xRotO = shot.pitch();
         frameMark = UpscaleManager.worldFrames();
+        shotStartNanos = System.nanoTime();
+    }
+
+    /** One log line per world frame: the brightness of the whole picture (HUD included) and the time since the shot began. */
+    private static void logCurve(Minecraft mc, Shot shot) {
+        RenderTarget main = mc.getMainRenderTarget();
+        int w = main.width;
+        int h = main.height;
+        ByteBuffer pixels = MemoryUtil.memAlloc(w * h * 4);
+        try {
+            RenderSystem.bindTexture(main.getColorTextureId());
+            GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixels);
+            long sum = 0;
+            long count = 0;
+            for (int y = 0; y < h; y += 4) {
+                for (int x = 0; x < w; x += 4) {
+                    int at = (y * w + x) * 4;
+                    sum += (pixels.get(at) & 255) + (pixels.get(at + 1) & 255) + (pixels.get(at + 2) & 255);
+                    count += 3;
+                }
+            }
+            LOGGER.info("{}curve {} frame {} ms {} luma {}", PREFIX, shot.name(), UpscaleManager.worldFrames() - frameMark,
+                    (System.nanoTime() - shotStartNanos) / 1_000_000L,
+                    String.format(java.util.Locale.ROOT, "%.2f", sum / (double) count));
+        } finally {
+            MemoryUtil.memFree(pixels);
+        }
     }
 
     /** Saves one render target as a PNG (used by the diagnostic shots). */

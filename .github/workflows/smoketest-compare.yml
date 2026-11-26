@@ -1,0 +1,125 @@
+# How good does the picture stay when the world is rendered at 25%, 50%, 70% and then upscaled? Takes the same view
+# at each scale (SmokeTest COMPARE_SHOTS), waits long enough after every change for a shader pack to settle, and
+# builds, for each scenario, a table (brightness, PSNR and detail against the native picture), a sheet with the same
+# crop of every shot side by side, and the frame-by-frame brightness curve.
+# Once with Sodium only (no shaders) and once with Sodium + Iris + a real shader pack from Modrinth.
+# Pictures and logs go to a rolling pre-release called "ci-compare". Informational: it does not block anything.
+
+name: smoketest-compare
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smoketest-compare
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+      - name: setup jdk (25 builds the mod, 21 runs the game like a phone launcher does)
+        uses: actions/setup-java@v5
+        with:
+          java-version: |
+            21
+            25
+          distribution: 'microsoft'
+      - name: install virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libgl1-mesa-dri libglx-mesa0 mesa-utils libxrandr2 libxinerama1 libxcursor1 libxi6 libxxf86vm1 libopenal1
+      - name: build the mod jar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build
+      - name: install Minecraft 1.21.1 and Fabric Loader
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install minecraft-launcher-lib pillow
+          .venv/bin/python ci/run_prod.py install
+      - name: shots with Sodium only (no shaders)
+        id: plain
+        continue-on-error: true
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -e '-sources' -e '-dev' | head -n 1)
+          .venv/bin/python ci/run_prod.py run --shots compare --frames 60 --curve --game-dir prod/plain \
+            --mod-jar "$JAR" --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium \
+            --prefix plain- --timeout 1500
+      - name: shots with Sodium, Iris and a real shader pack
+        id: shaders
+        continue-on-error: true
+        run: |
+          JAR=$(ls build/libs/*.jar | grep -v -e '-sources' -e '-dev' | head -n 1)
+          .venv/bin/python ci/run_prod.py run --shots compare --frames 60 --curve --game-dir prod/shaders \
+            --mod-jar "$JAR" --java "$JAVA_HOME_21_X64/bin/java" --mods fabric-api sodium iris \
+            --shaderpack-modrinth makeup-ultra-fast --prefix shaders- --timeout 1800
+      - name: reports
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          : > out/report.txt
+          for scenario in plain shaders; do
+            echo "=================== $scenario" >> out/report.txt
+            .venv/bin/python ci/scale_report.py "prod/$scenario/smoketest" "$scenario-" "out/$scenario-sheet.png" >> out/report.txt || true
+            echo >> out/report.txt
+            echo "--- brightness by frame after each change ($scenario)" >> out/report.txt
+            .venv/bin/python ci/curve_report.py "prod/$scenario/logs/latest.log" >> out/report.txt || true
+            echo >> out/report.txt
+          done
+          cat out/report.txt
+      - name: show the interesting log lines
+        if: always()
+        run: |
+          for dir in prod/plain prod/shaders; do
+            echo "=================== $dir"
+            cat "$dir/mods-used.txt" 2>/dev/null || true
+            LOG="$dir/logs/latest.log"
+            [ -e "$LOG" ] || LOG="$dir/launcher-output.log"
+            grep -n "PocketFSR\|Exception\|ERROR\|FATAL\|OpenGL debug" "$LOG" | grep -v "curve " | cut -c1-300 | head -100 || true
+            ls -la "$dir/smoketest" "$dir/crash-reports" 2>/dev/null || true
+          done
+      - name: publish pictures and logs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          for dir in prod/plain prod/shaders; do
+            prefix=$(basename "$dir")-
+            cp "$dir"/smoketest/*.png out/ 2>/dev/null || true
+            cp "$dir/logs/latest.log" "out/${prefix}game-latest.log" 2>/dev/null || true
+            cp "$dir/launcher-output.log" "out/${prefix}launcher-output.log" 2>/dev/null || true
+            cp "$dir/mods-used.txt" "out/${prefix}mods-used.txt" 2>/dev/null || true
+            for crash in "$dir"/crash-reports/*.txt; do
+              [ -e "$crash" ] || continue
+              cp "$crash" "out/${prefix}$(basename "$crash")"
+            done
+          done
+          ls -la out
+          NOTES="Same view at 100%, 70%, 50% and 25% render scale, upscaled by Pocket FSR (report.txt has the numbers, *-sheet.png the pictures side by side), with Sodium only and with Sodium + Iris + a real shader pack, commit ${GITHUB_SHA}. Not a mod release. Used: $(tr '\n' ';' < prod/shaders/mods-used.txt 2>/dev/null)"
+          for attempt in 1 2 3; do
+            gh release delete ci-compare --cleanup-tag -y || true
+            if gh release create ci-compare out/* \
+                --prerelease --target "${GITHUB_SHA}" \
+                --title "Scale comparison (${GITHUB_SHA::7})" \
+                --notes "$NOTES"; then
+              break
+            fi
+            echo "creating the release failed (attempt ${attempt}), trying again"
+            sleep 15
+          done
+          gh release view ci-compare > /dev/null
+      - name: report
+        if: always()
+        run: |
+          echo "shots with Sodium only: ${{ steps.plain.outcome }}"
+          echo "shots with the shader pack: ${{ steps.shaders.outcome }}"

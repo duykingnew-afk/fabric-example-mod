@@ -10,6 +10,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # the question is answered (the picture was never darkened by the passes), so it only runs again when it changes
+    paths:
+      - '.github/workflows/smoketest-diag.yml'
+      - 'ci/diag_report.py'
 
 permissions:
   contents: write

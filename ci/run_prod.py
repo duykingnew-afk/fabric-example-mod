@@ -190,7 +190,9 @@ def run(args):
         os.environ,
         POCKETFSR_SMOKETEST="1",
         POCKETFSR_SMOKETEST_PREFIX=args.prefix,
-        **({"POCKETFSR_SMOKETEST_DIAG": "1"} if args.diag else {}),
+        POCKETFSR_SMOKETEST_SET="diag" if args.diag else args.shots,
+        POCKETFSR_SMOKETEST_FRAMES=str(args.frames),
+        **({"POCKETFSR_SMOKETEST_CURVE": "1"} if args.curve else {}),
         LIBGL_ALWAYS_SOFTWARE="1",
         MESA_GL_VERSION_OVERRIDE="4.5",
         MESA_GLSL_VERSION_OVERRIDE="450",
@@ -236,7 +238,11 @@ def main():
     run_parser.add_argument("--shaderpack", help="folder of a shader pack to copy in")
     run_parser.add_argument("--shaderpack-modrinth", help="slug of a shader pack to download from Modrinth")
     run_parser.add_argument("--prefix", default="")
-    run_parser.add_argument("--diag", action="store_true", help="take the diagnostic shots (see SmokeTest.DIAG_SHOTS)")
+    run_parser.add_argument("--diag", action="store_true", help="take the diagnostic shots (same as --shots diag)")
+    run_parser.add_argument("--shots", default="default", choices=["default", "diag", "compare"],
+                            help="which shots to take (see SmokeTest)")
+    run_parser.add_argument("--frames", type=int, default=8, help="world frames to wait before each picture")
+    run_parser.add_argument("--curve", action="store_true", help="log the brightness and time of every world frame")
     run_parser.add_argument("--java", default="java")
     run_parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args()
