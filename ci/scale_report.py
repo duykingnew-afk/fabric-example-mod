@@ -20,6 +20,8 @@ SHOTS = [
     ("c-fsr50", "FSR 50%"),
     ("c-fsr25", "FSR 25%"),
     ("c-fsr25-sharp", "FSR 25%, sharpness 100%"),
+    ("c-fsr25-lod", "FSR 25%, textures 2 levels finer"),
+    ("c-fsr50-lod", "FSR 50%, textures 1 level finer"),
     ("c-bilinear25", "bilinear 25%"),
     ("c-bilinear70", "bilinear 70%"),
     ("c-native-2", "native 100% again"),
@@ -62,7 +64,7 @@ def main():
         luma = sum(ImageStat.Stat(image).mean) / 3.0
         print(f"{label:<28} {luma / native_luma:7.3f} {psnr(image, native):8.2f} {100.0 * detail(image) / native_detail:9.1f}")
 
-    shown = [(key, label) for key, label in SHOTS if key in pictures and key not in ("c-native-2", "c-bilinear70")]
+    shown = [(key, label) for key, label in SHOTS if key in pictures and key not in ("c-native-2", "c-bilinear70", "c-fsr50-lod")]
     columns = 3
     rows = (len(shown) + columns - 1) // columns
     tile_w, tile_h = CROP[2] - CROP[0], CROP[3] - CROP[1]

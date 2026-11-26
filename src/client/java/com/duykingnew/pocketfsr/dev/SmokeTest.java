@@ -25,6 +25,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.GameRules;
@@ -60,15 +61,15 @@ public final class SmokeTest {
      * to see where a difference between two modes comes from.
      */
     private record Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch,
-                        float sharpness, boolean freshState, boolean dump, int lowFilter) {
+                        float sharpness, boolean freshState, boolean dump, int lowFilter, float lodBias) {
         Shot(String name, boolean enabled, float scale, PocketFsrConfig.Mode mode, float pitch) {
-            this(name, enabled, scale, mode, pitch, 0.8F, false, false, -1);
+            this(name, enabled, scale, mode, pitch, 0.8F, false, false, -1, 0.0F);
         }
     }
 
     /** A diagnostic shot at 50%, looking ahead. */
     private static Shot diag(String name, PocketFsrConfig.Mode mode, float sharpness, boolean freshState, int lowFilter) {
-        return new Shot(name, true, 0.5F, mode, 0.0F, sharpness, freshState, true, lowFilter);
+        return new Shot(name, true, 0.5F, mode, 0.0F, sharpness, freshState, true, lowFilter, 0.0F);
     }
 
     private static final float AHEAD = 0.0F;
@@ -100,7 +101,12 @@ public final class SmokeTest {
     };
     /** The same view at different scales and sharpness: how far from the native picture does each one stay? */
     private static Shot compare(String name, float scale, PocketFsrConfig.Mode mode, float sharpness) {
-        return new Shot(name, true, scale, mode, AHEAD, sharpness, false, false, -1);
+        return new Shot(name, true, scale, mode, AHEAD, sharpness, false, false, -1, 0.0F);
+    }
+
+    /** The same with the block atlas sampled {@code lodBias} levels finer (AMD advises -log2 of the upscale ratio). */
+    private static Shot compareLod(String name, float scale, float lodBias) {
+        return new Shot(name, true, scale, PocketFsrConfig.Mode.FSR1, AHEAD, 0.8F, false, false, -1, lodBias);
     }
 
     private static final Shot[] COMPARE_SHOTS = {
@@ -109,6 +115,8 @@ public final class SmokeTest {
             compare("c-fsr50", 0.50F, PocketFsrConfig.Mode.FSR1, 0.8F),
             compare("c-fsr25", 0.25F, PocketFsrConfig.Mode.FSR1, 0.8F),
             compare("c-fsr25-sharp", 0.25F, PocketFsrConfig.Mode.FSR1, 1.0F),
+            compareLod("c-fsr25-lod", 0.25F, -2.0F),
+            compareLod("c-fsr50-lod", 0.50F, -1.0F),
             compare("c-bilinear25", 0.25F, PocketFsrConfig.Mode.BILINEAR, 0.8F),
             compare("c-bilinear70", 0.70F, PocketFsrConfig.Mode.BILINEAR, 0.8F),
             new Shot("c-native-2", false, 1.0F, PocketFsrConfig.Mode.FSR1, AHEAD),
@@ -249,6 +257,7 @@ public final class SmokeTest {
         cfg.sharpness = shot.sharpness();
         UpscaleManager.debugFreshState = shot.freshState();
         UpscaleManager.debugLowFilter = shot.lowFilter();
+        setAtlasLodBias(mc, shot.lodBias());
         diagFrames = 0;
         if (shot.dump()) {
             UpscaleManager.debugCapture(
@@ -269,6 +278,15 @@ public final class SmokeTest {
         mc.player.xRotO = shot.pitch();
         frameMark = UpscaleManager.worldFrames();
         shotStartNanos = System.nanoTime();
+    }
+
+    /** Texture LOD bias of the block atlas (test only): a negative value keeps block textures sharper at a low render scale. */
+    private static void setAtlasLodBias(Minecraft mc, float bias) {
+        int id = mc.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getId();
+        int previous = GL11.glGetInteger(0x8069);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, id);
+        GL11.glTexParameterf(GL11.GL_TEXTURE_2D, 0x8501, bias);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
     }
 
     /** One log line per world frame: the brightness of the whole picture (HUD included) and the time since the shot began. */
